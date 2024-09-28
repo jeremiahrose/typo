@@ -1,0 +1,1 @@
+If I ask to go to a repo, then I want to go to the root of the repo, not some subfolder within it.

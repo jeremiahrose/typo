@@ -1,0 +1,1 @@
+I use VS code to work on repos. When opening a new VS Code session, do it in my existing window rather than creating a new window.
