@@ -52,14 +52,14 @@ Run this command (y/n)? y
 - Needs to be tested in Linux / Bash!
 
 ## Installation (MacOS)
-1. Clone this repo
-2. Install dependencies `brew install fd fzf`
+1. `brew tap jeremiahrose/typo`
+2. `brew install typo`
 3. Add the following to your `.zshrc` file:
 ```zsh
-# Load typo
-source ~/path/to/repo/typo/typo.sh
-# OpenAI API key
+# Load typo (your path may be different)
+source /opt/homebrew/opt/typo/typo.sh
+# Export your OpenAI API key so typo can connect to GPT4o
 export OPENAI_API_KEY=your_key
 ```
-4. Customise behaviour by dragging prompts in/out of the `active_prompts` directory
+4. Customise behaviour by dragging prompts in/out of the `/opt/homebrew/opt/typo/active_prompts` directory
 5. Upload your new and useful prompts as a PR to this repository :)
