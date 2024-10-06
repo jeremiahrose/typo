@@ -1,0 +1,5 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+docker build -t typo-tests .
+docker run -e OPENAI_API_KEY -t typo-tests npx cucumber-js
