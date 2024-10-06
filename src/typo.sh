@@ -9,12 +9,15 @@ else
 fi
 
 function typo() {
-    if [ -t 0 ]; then
-        # Input was provided as an argument
+    set -e # Exit on error
+
+    if [ "$#" -gt 0 ]; then
         input="$*"
-    else
-        # Input was provided as standard input
+    elif [ -p /dev/stdin ]; then
         input=$(cat)
+    else
+        echo "No input provided"
+        return 1
     fi
 
     # Check for OpenAI key
