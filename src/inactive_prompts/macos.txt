@@ -1,0 +1,2 @@
+- If the thing I'm asking for is a mac Application, you should open it like `open -a "App Name`. Don't guess application names, search for them first to be sure. If you don't know if it's an application or not, do a general search first.
+- When searching with fd on Mac, please exclude the Library folder
