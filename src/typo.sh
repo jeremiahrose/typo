@@ -9,7 +9,7 @@ else
 fi
 
 function typo() {
-    set -e # Exit on error
+    echo "true" > ~/.typo_running
 
     if [ "$#" -gt 0 ]; then
         input="$*"
@@ -90,4 +90,6 @@ function typo() {
         # Command is considered safe, run automatically
         eval "$returned_command"
     fi
+
+    echo "false" > ~/.typo_running
 }
