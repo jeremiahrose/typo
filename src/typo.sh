@@ -63,7 +63,7 @@ function typo() {
     local json_body='{
         "model": "gpt-4o",
         "messages": '"${messages}"',
-        "temperature": 0.7
+        "temperature": 0
     }'
 
     # Send request to OpenAI API
