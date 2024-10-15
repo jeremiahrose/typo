@@ -11,6 +11,21 @@ fi
 function typo() {
     echo "true" > ~/.typo_running
 
+    if ! command -v jq &>/dev/null; then
+        echo "jq is not installed"
+        return 1
+    fi
+
+    if ! command -v fzf &>/dev/null; then
+        echo "fzf is not installed"
+        return 1
+    fi
+
+    if ! command -v fd &>/dev/null && ! command -v fdfind &>/dev/null; then
+        echo "fd is not installed"
+        return 1
+    fi
+
     if [ "$#" -gt 0 ]; then
         input="$*"
     elif [ -p /dev/stdin ]; then
