@@ -24,10 +24,12 @@ Given('the user starts a {word} session', function (shell) {
 });
 
 function run_command(cmd) {
+  console.log("\x1b[32m$\x1b[0m " + cmd);
   shellProcess.stdin.write(cmd + `\n`);
 }
 
 Given('typo is sourced', function() {
+  console.log();
   run_command(`source src/typo.sh`);
 });
 
