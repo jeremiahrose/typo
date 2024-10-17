@@ -33,6 +33,7 @@ function run_command(cmd) {
 Given('typo is sourced', function() {
   console.log();
   run_command(`source src/typo.sh`);
+  run_command(`alias fd=fdfind`);
 });
 
 When('the user runs {string}', function (command) {
@@ -88,6 +89,20 @@ Then('the last line of the output should equal {string}', function (expectedOutp
   } catch (err) {
     callback(err);
   }
+});
+
+Then('the current directory should be {string}', function (expectedOutput, callback) {
+  run_command(`pwd`);
+  setTimeout(() => {
+    try {
+      const lastLine = output.trimEnd().split('\n').pop();
+      assert.equal(lastLine, expectedOutput);
+      output = '';
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }, 100);
 });
 
 After(function () {
