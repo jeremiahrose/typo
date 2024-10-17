@@ -9,7 +9,22 @@ else
 fi
 
 function typo() {
-    set -e # Exit on error
+    echo "true" > ~/.typo_running
+
+    if ! command -v jq &>/dev/null; then
+        echo "jq is not installed"
+        return 1
+    fi
+
+    if ! command -v fzf &>/dev/null; then
+        echo "fzf is not installed"
+        return 1
+    fi
+
+    if ! command -v fd &>/dev/null && ! command -v fdfind &>/dev/null; then
+        echo "fd is not installed"
+        return 1
+    fi
 
     if [ "$#" -gt 0 ]; then
         input="$*"
@@ -48,7 +63,7 @@ function typo() {
     local json_body='{
         "model": "gpt-4o",
         "messages": '"${messages}"',
-        "temperature": 0.7
+        "temperature": 0
     }'
 
     # Send request to OpenAI API
@@ -90,4 +105,6 @@ function typo() {
         # Command is considered safe, run automatically
         eval "$returned_command"
     fi
+
+    echo "false" > ~/.typo_running
 }
