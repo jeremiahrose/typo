@@ -49,10 +49,25 @@ Then('stderr should be empty', function (callback) {
   }
 });
 
+function pollUntil(condition, callback, timeout, timeout_message) {
+  const interval = setInterval(() => {
+    if (condition()) {
+      clearInterval(interval);
+      clearTimeout(timeout); // Clear the timeout if the command finishes
+      callback();
+    }
+  }, 500); // Poll every 500ms until the file contains 'false'
+
+  setTimeout(() => {
+    clearInterval(interval);
+    callback(new Error(timeout_message));
+  }, timeout); // Fail if the command doesn't finish in 10 seconds
+}
+
 When('typo has finished running', function (callback) {
   const homeDir = require('os').homedir();
   const typoRunningFile = path.join(homeDir, '.typo_running');
-  const timeoutLimit = 10000; // 10 seconds overall timeout
+  const timeout = 10000; // 10 seconds overall timeout
 
   const typoFinished = () => {
     try {
@@ -65,19 +80,7 @@ When('typo has finished running', function (callback) {
     }
   };
 
-  const interval = setInterval(() => {
-    if (typoFinished()) {
-      // console.log("typo finished!");
-      clearInterval(interval);
-      clearTimeout(timeout); // Clear the timeout if the command finishes
-      callback();
-    }
-  }, 500); // Poll every 500ms until the file contains 'false'
-
-  const timeout = setTimeout(() => {
-    clearInterval(interval);
-    callback(new Error('Timeout: typo did not finish running in time.'));
-  }, timeoutLimit); // Fail if the command doesn't finish in 10 seconds
+  pollUntil(typoFinished, callback, timeout, 'Timeout: typo did not finish running in time.');
 });
 
 Then('the last line of the output should equal {string}', function (expectedOutput, callback) {
