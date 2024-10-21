@@ -1,8 +1,8 @@
 # Determine the path to the installation directory when the typo function is sourced
 if [ -n "$BASH_VERSION" ]; then
-    G_INSTALLATION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+    TYPO_INSTALLATION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 elif [ -n "$ZSH_VERSION" ]; then
-    G_INSTALLATION_DIR="$(cd "$(dirname "${(%):-%N}")" &>/dev/null && pwd)"
+    TYPO_INSTALLATION_DIR="$(cd "$(dirname "${(%):-%N}")" &>/dev/null && pwd)"
 else
     echo "Unsupported shell" >&2
     return 1
@@ -42,17 +42,33 @@ function typo() {
     fi
 
     # Construct system prompt by concatenating text files. Base prompt first, then the others in arbitrary order.
-    local prompts_dir="${G_INSTALLATION_DIR}/active_prompts"
-    local base_prompt=$(cat "${prompts_dir}/base.txt"; for file in $(ls "${prompts_dir}" | grep -v 'base.txt'); do echo ""; cat "$prompts_dir/$file"; done)
+    local prompts_dir="${TYPO_INSTALLATION_DIR}/active_prompts"
+    local base_prompt=$(cat "${prompts_dir}/base.txt")
+
+    # Append other prompts from active_prompts (excluding base.txt)
+    for file in "${prompts_dir}"/*; do
+        if [ "$file" != "${prompts_dir}/base.txt" ] && [ -f "$file" ]; then
+            base_prompt="${base_prompt}"$'\n'"$(cat "$file")"
+        fi
+    done
+
+    # Append prompts from custom directory specified in environment variable
+    if [ -n "$TYPO_CUSTOM_PROMPTS_DIR" ] && [ -d "$TYPO_CUSTOM_PROMPTS_DIR" ] && [ "$(ls -A "$TYPO_CUSTOM_PROMPTS_DIR")" ]; then
+        for file in "${TYPO_CUSTOM_PROMPTS_DIR}"/*; do
+            if [ -f "$file" ]; then
+                base_prompt="${base_prompt}"$'\n'"$(cat "$file")"
+            fi
+        done
+    fi
 
     # Initialise conversation history
     local messages=""
-    if [ -z "$G_CONVERSATION_HISTORY" ]; then
+    if [ -z "$TYPO_CONVERSATION_HISTORY" ]; then
         # If there is no history, start with the base prompt
         messages="[{\"role\": \"system\", \"content\": $(jq -Rn --arg content "$base_prompt" '$content')}]"
     else
         # Otherwise use the existing conversation history
-        messages="$G_CONVERSATION_HISTORY"
+        messages="$TYPO_CONVERSATION_HISTORY"
     fi
 
     # Append user input to the conversation
@@ -86,7 +102,7 @@ function typo() {
 
     # Append the returned command to conversation
     local returned_command_json="{\"role\": \"assistant\", \"content\": $(jq -Rn --arg content "$returned_command" '$content')}"
-    G_CONVERSATION_HISTORY=$(jq -c ". + [$returned_command_json]" <<< "$messages")
+    TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$returned_command_json]" <<< "$messages")
 
     # Define a list of dangerous commands
     local dangerous_commands=("rm" "mv" "cp" "chmod" "chown" "chgrp" "dd" "shutdown" "reboot" "init" "telinit" "kill" "killall" "pkill" "mkfs" "fsck" "fdisk" "ln" "sudo" "su" "rmdir" "mkfs" "ipfw" "blkdiscard" "hdparm" "systemd" "alias" "poweroff" "exit")
