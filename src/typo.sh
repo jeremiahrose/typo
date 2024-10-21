@@ -26,6 +26,10 @@ function typo() {
         return 1
     fi
 
+    if ! command -v fdfind &>/dev/null; then
+        alias fdfind=fd
+    fi
+
     if [ "$#" -gt 0 ]; then
         input="$*"
     elif [ -p /dev/stdin ]; then
