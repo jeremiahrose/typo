@@ -106,17 +106,21 @@ function typo() {
     local returned_command_json="{\"role\": \"assistant\", \"content\": $(jq -Rn --arg content "$returned_command" '$content')}"
     TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$returned_command_json]" <<< "$messages")
 
-    if [ "$unsafe_mode" -eq 1 ]; then
-        # Run the command automatically if --unsafe is set
-        eval "$returned_command"
+    if [[ "$returned_command" =~ ^# ]]; then
+        echo ""
     else
-        # Otherwise, ask for confirmation before running
-        read -t 0.2 -k 10 drain < /dev/tty
-        read "choice?Run this command (y/n)? " < /dev/tty
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
+        if [ "$unsafe_mode" -eq 1 ]; then
+            # Run the command automatically if --unsafe is set
             eval "$returned_command"
         else
-            echo "Command not executed."
+            # Otherwise, ask for confirmation before running
+            read -t 0.2 -k 10 drain < /dev/tty
+            read "choice?Run this command (y/n)? " < /dev/tty
+            if [[ "$choice" =~ ^[Yy]$ ]]; then
+                eval "$returned_command"
+            else
+                echo "Command not executed."
+            fi
         fi
     fi
 
