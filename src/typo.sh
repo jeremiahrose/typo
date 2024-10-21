@@ -43,7 +43,23 @@ function typo() {
 
     # Construct system prompt by concatenating text files. Base prompt first, then the others in arbitrary order.
     local prompts_dir="${TYPO_INSTALLATION_DIR}/active_prompts"
-    local base_prompt=$(cat "${prompts_dir}/base.txt"; for file in $(ls "${prompts_dir}" | grep -v 'base.txt'); do echo ""; cat "$prompts_dir/$file"; done)
+    local base_prompt=$(cat "${prompts_dir}/base.txt")
+
+    # Append other prompts from active_prompts (excluding base.txt)
+    for file in "${prompts_dir}"/*; do
+        if [ "$file" != "${prompts_dir}/base.txt" ] && [ -f "$file" ]; then
+            base_prompt="${base_prompt}"$'\n'"$(cat "$file")"
+        fi
+    done
+
+    # Append prompts from custom directory specified in environment variable
+    if [ -n "$TYPO_CUSTOM_PROMPTS_DIR" ] && [ -d "$TYPO_CUSTOM_PROMPTS_DIR" ] && [ "$(ls -A "$TYPO_CUSTOM_PROMPTS_DIR")" ]; then
+        for file in "${TYPO_CUSTOM_PROMPTS_DIR}"/*; do
+            if [ -f "$file" ]; then
+                base_prompt="${base_prompt}"$'\n'"$(cat "$file")"
+            fi
+        done
+    fi
 
     # Initialise conversation history
     local messages=""
