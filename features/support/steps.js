@@ -36,6 +36,11 @@ Given('typo is sourced', function() {
   run_command(`alias fd=fdfind`);
 });
 
+Given('an empty test directory', function () {
+  const dirPath = '/home/node/test';
+  fs.rmSync(dirPath, { recursive: true, force: true });
+});
+
 When('the user runs {string}', function (command) {
   run_command(`${command}`);
 });
@@ -49,10 +54,47 @@ Then('stderr should be empty', function (callback) {
   }
 });
 
+Then('typo should ask the user for confirmation to run a command', function(callback) {
+  output = '';
+
+  const confirmationRequested = () => {
+    const lastLine = output.trimEnd().split('\n').pop().trim();
+    return lastLine == "Run this command (y/n)?";
+  }
+
+  pollUntil(confirmationRequested, callback, 10000, "Timeout: typo didn't request user confirmation");
+});
+
+When('the user grants permission', function(callback) {
+  setTimeout(() => {
+    try {
+      run_command('y');
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }, 100);
+});
+
+function pollUntil(condition, callback, timeout, timeout_message) {
+  const interval = setInterval(() => {
+    if (condition()) {
+      clearInterval(interval);
+      clearTimeout(timeout); // Clear the timeout if the command finishes
+      callback();
+    }
+  }, 500); // Poll every 500ms until the file contains 'false'
+
+  setTimeout(() => {
+    clearInterval(interval);
+    callback(new Error(timeout_message));
+  }, timeout); // Fail if the command doesn't finish in 10 seconds
+}
+
 When('typo has finished running', function (callback) {
   const homeDir = require('os').homedir();
   const typoRunningFile = path.join(homeDir, '.typo_running');
-  const timeoutLimit = 10000; // 10 seconds overall timeout
+  const timeout = 10000; // 10 seconds overall timeout
 
   const typoFinished = () => {
     try {
@@ -65,19 +107,7 @@ When('typo has finished running', function (callback) {
     }
   };
 
-  const interval = setInterval(() => {
-    if (typoFinished()) {
-      // console.log("typo finished!");
-      clearInterval(interval);
-      clearTimeout(timeout); // Clear the timeout if the command finishes
-      callback();
-    }
-  }, 500); // Poll every 500ms until the file contains 'false'
-
-  const timeout = setTimeout(() => {
-    clearInterval(interval);
-    callback(new Error('Timeout: typo did not finish running in time.'));
-  }, timeoutLimit); // Fail if the command doesn't finish in 10 seconds
+  pollUntil(typoFinished, callback, timeout, 'Timeout: typo did not finish running in time.');
 });
 
 Then('the last line of the output should equal {string}', function (expectedOutput, callback) {
@@ -103,6 +133,18 @@ Then('the current directory should be {string}', function (expectedOutput, callb
       callback(err);
     }
   }, 100);
+});
+
+Then('{string} should contain exactly {string}', function (file, contents, callback) {
+  try {
+    const data = fs.readFileSync(file, 'utf8').trim();
+    assert.equal(data, contents.replaceAll('\\n', '\n'));
+    callback();
+    console.log(data);
+  } catch (err) {
+    console.error(err);
+    callback(err);
+  }
 });
 
 After(function () {
