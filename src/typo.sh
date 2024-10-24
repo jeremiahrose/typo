@@ -46,8 +46,7 @@ function typo() {
     elif [ -p /dev/stdin ]; then
         input=$(cat)
     else
-        echo "No input provided"
-        return 1
+        input=""
     fi
 
     if [ -z "$OPENAI_API_KEY" ]; then
