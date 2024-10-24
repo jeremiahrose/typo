@@ -36,6 +36,11 @@ Given('typo is sourced', function() {
   run_command(`alias fd=fdfind`);
 });
 
+Given('an empty test directory', function () {
+  const dirPath = '/home/node/test';
+  fs.rmSync(dirPath, { recursive: true, force: true });
+});
+
 When('the user runs {string}', function (command) {
   run_command(`${command}`);
 });
@@ -128,6 +133,18 @@ Then('the current directory should be {string}', function (expectedOutput, callb
       callback(err);
     }
   }, 100);
+});
+
+Then('{string} should contain exactly {string}', function (file, contents, callback) {
+  try {
+    const data = fs.readFileSync(file, 'utf8').trim();
+    assert.equal(data, contents.replaceAll('\\n', '\n'));
+    callback();
+    console.log(data);
+  } catch (err) {
+    console.error(err);
+    callback(err);
+  }
 });
 
 After(function () {
