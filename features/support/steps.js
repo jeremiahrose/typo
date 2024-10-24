@@ -49,6 +49,28 @@ Then('stderr should be empty', function (callback) {
   }
 });
 
+Then('typo should ask the user for confirmation to run a command', function(callback) {
+  output = '';
+
+  const confirmationRequested = () => {
+    const lastLine = output.trimEnd().split('\n').pop().trim();
+    return lastLine == "Run this command (y/n)?";
+  }
+
+  pollUntil(confirmationRequested, callback, 10000, "Timeout: typo didn't request user confirmation");
+});
+
+When('the user grants permission', function(callback) {
+  setTimeout(() => {
+    try {
+      run_command('y');
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }, 100);
+});
+
 function pollUntil(condition, callback, timeout, timeout_message) {
   const interval = setInterval(() => {
     if (condition()) {

@@ -8,6 +8,22 @@ else
     return 1
 fi
 
+typo_get_user_confirmation() {
+    if [ -n "$BASH_VERSION" ]; then
+        read -t 0.2 -n 10 drain < /dev/tty
+        read choice
+    elif [ -n "$ZSH_VERSION" ]; then
+        read -t 0.2 -k 10 drain < /dev/tty
+        read "choice?"
+    fi
+
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 function typo() {
     echo "true" > ~/.typo_running
 
@@ -109,13 +125,10 @@ function typo() {
         echo ""
     else
         if [ "$unsafe_mode" -eq 1 ]; then
-            # Run the command automatically if --unsafe is set
             eval "$returned_command"
         else
-            # Otherwise, ask for confirmation before running
-            read -t 0.2 -k 10 drain < /dev/tty
-            read "choice?Run this command (y/n)? " < /dev/tty
-            if [[ "$choice" =~ ^[Yy]$ ]]; then
+            echo "Run this command (y/n)?"
+            if typo_get_user_confirmation; then
                 eval "$returned_command"
             else
                 echo "Command not executed."
