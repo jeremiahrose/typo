@@ -27,17 +27,6 @@ typo_get_user_confirmation() {
 function typo() {
     echo "true" > ~/.typo_running
 
-    local unsafe_mode=0
-
-    # Check for --unsafe flag
-    for arg in "$@"; do
-        if [ "$arg" = "--unsafe" ]; then
-            unsafe_mode=1
-            shift
-            break
-        fi
-    done
-
     if ! command -v jq &>/dev/null; then
         echo "jq is not installed"
         return 1
@@ -124,7 +113,7 @@ function typo() {
     if [[ "$returned_command" =~ ^# ]]; then
         echo ""
     else
-        if [ "$unsafe_mode" -eq 1 ]; then
+        if [ "${TYPO_UNSAFE_MODE:-0}" -eq 1 ]; then
             eval "$returned_command"
         else
             echo "Run this command (y/n)?"
