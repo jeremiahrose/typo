@@ -105,18 +105,18 @@ function typo() {
     fi
 
     local returned_command=$(printf "%s" "$response" | jq -r '.choices[0].message.content')
-    printf "%s\n" "$returned_command"
+    printf "%s\n" "$returned_command" >&2
 
     local returned_command_json="{\"role\": \"assistant\", \"content\": $(jq -Rn --arg content "$returned_command" '$content')}"
     TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$returned_command_json]" <<< "$messages")
 
     if [[ "$returned_command" =~ ^# ]]; then
-        echo ""
+        echo "" >&2
     else
         if [ "${TYPO_UNSAFE_MODE:-0}" -eq 1 ]; then
             eval "$returned_command"
         else
-            echo "Run this command (y/n)?"
+            echo "Run this command (y/n)?" >&2
             if typo_get_user_confirmation; then
                 eval "$returned_command"
             else

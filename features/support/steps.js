@@ -45,20 +45,11 @@ When('the user runs {string}', function (command) {
   run_command(`${command}`);
 });
 
-Then('stderr should be empty', function (callback) {
-  try {
-    assert.equal(errorOutput, '', 'Expected stderr to be empty, but some error output was found');
-    callback();
-  } catch (err) {
-    callback(err);
-  }
-});
-
 Then('typo should ask the user for confirmation to run a command', function(callback) {
-  output = '';
+  errorOutput = '';
 
   const confirmationRequested = () => {
-    const lastLine = output.trimEnd().split('\n').pop().trim();
+    const lastLine = errorOutput.trimEnd().split('\n').pop().trim();
     return lastLine == "Run this command (y/n)?";
   }
 
