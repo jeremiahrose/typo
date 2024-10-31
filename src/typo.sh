@@ -24,6 +24,17 @@ function typo_get_user_confirmation() {
     fi
 }
 
+function typo_capture_output() {
+  local tmpfile=$(mktemp)           # Make a temp file
+  exec 3>&1                        # Save the current stdout
+  exec 1> >(tee "$tmpfile")         # Copy stdout to the temporary file
+  eval "$*"                        # Run the command in the current shell
+  exec 1>&3                        # Restore stdout
+  sleep 1                          # Give tee a moment to finish writing to the temp file
+  command_output=$(cat "$tmpfile")  # Read the temp file into a variable
+  rm "$tmpfile"                     # Delete the temp file
+}
+
 function typo_add_to_conversation_history() {
     local role="$1"
     local message="$2"
@@ -115,15 +126,17 @@ function typo() {
 
     typo_add_to_conversation_history "assistant" "$returned_command"
 
+    local command_output=""
+
     if [[ "$returned_command" =~ ^# ]]; then
         echo "" >&2
     else
         if [ "${TYPO_UNSAFE_MODE:-0}" -eq 1 ]; then
-            eval "$returned_command"
+            typo_capture_output "$returned_command"
         else
             echo "Run this command (y/n)?" >&2
             if typo_get_user_confirmation; then
-                eval "$returned_command"
+                typo_capture_output "$returned_command"
             else
                 echo "Command not executed."
             fi
