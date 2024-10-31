@@ -8,7 +8,7 @@ else
     return 1
 fi
 
-typo_get_user_confirmation() {
+function typo_get_user_confirmation() {
     if [ -n "$BASH_VERSION" ]; then
         read -t 0.2 -n 10 drain < /dev/tty
         read choice
@@ -22,6 +22,16 @@ typo_get_user_confirmation() {
     else
         return 1
     fi
+}
+
+function typo_add_to_conversation_history() {
+    local role="$1"
+    local message="$2"
+    if [[ -z "$message" ]]; then
+        return
+    fi
+    local message_json="{\"role\": \"$role\", \"content\": $(jq -Rn --arg content "$message" '$content')}"
+    TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$message_json]" <<< "$TYPO_CONVERSATION_HISTORY")
 }
 
 function typo() {
@@ -76,19 +86,15 @@ function typo() {
         done
     fi
 
-    local messages=""
     if [ -z "$TYPO_CONVERSATION_HISTORY" ]; then
-        messages="[{\"role\": \"system\", \"content\": $(jq -Rn --arg content "$base_prompt" '$content')}]"
-    else
-        messages="$TYPO_CONVERSATION_HISTORY"
+        TYPO_CONVERSATION_HISTORY="[{\"role\": \"system\", \"content\": $(jq -Rn --arg content "$base_prompt" '$content')}]"
     fi
 
-    local user_message="{\"role\": \"user\", \"content\": $(jq -Rn --arg content "$input" '$content')}"
-    messages=$(jq -c ". + [$user_message]" <<< "$messages")
+    typo_add_to_conversation_history "user" "$input"
 
     local json_body='{
         "model": "gpt-4o",
-        "messages": '"${messages}"',
+        "messages": '"${TYPO_CONVERSATION_HISTORY}"',
         "temperature": 0
     }'
 
@@ -107,8 +113,7 @@ function typo() {
     local returned_command=$(printf "%s" "$response" | jq -r '.choices[0].message.content')
     printf "%s\n" "$returned_command" >&2
 
-    local returned_command_json="{\"role\": \"assistant\", \"content\": $(jq -Rn --arg content "$returned_command" '$content')}"
-    TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$returned_command_json]" <<< "$messages")
+    typo_add_to_conversation_history "assistant" "$returned_command"
 
     if [[ "$returned_command" =~ ^# ]]; then
         echo "" >&2
@@ -124,6 +129,8 @@ function typo() {
             fi
         fi
     fi
+
+    typo_add_to_conversation_history "user" "$command_output"
 
     echo "false" > ~/.typo_running
 }
