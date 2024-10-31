@@ -8,7 +8,7 @@ else
     return 1
 fi
 
-typo_get_user_confirmation() {
+function typo_get_user_confirmation() {
     if [ -n "$BASH_VERSION" ]; then
         read -t 0.2 -n 10 drain < /dev/tty
         read choice
@@ -24,19 +24,29 @@ typo_get_user_confirmation() {
     fi
 }
 
+function typo_capture_output() {
+  local tmpfile=$(mktemp)           # Make a temp file
+  exec 3>&1                        # Save the current stdout
+  exec 1> >(tee "$tmpfile")         # Copy stdout to the temporary file
+  eval "$*"                        # Run the command in the current shell
+  exec 1>&3                        # Restore stdout
+  sleep 1                          # Give tee a moment to finish writing to the temp file
+  command_output=$(cat "$tmpfile")  # Read the temp file into a variable
+  rm "$tmpfile"                     # Delete the temp file
+}
+
+function typo_add_to_conversation_history() {
+    local role="$1"
+    local message="$2"
+    if [[ -z "$message" ]]; then
+        return
+    fi
+    local message_json="{\"role\": \"$role\", \"content\": $(jq -Rn --arg content "$message" '$content')}"
+    TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$message_json]" <<< "$TYPO_CONVERSATION_HISTORY")
+}
+
 function typo() {
     echo "true" > ~/.typo_running
-
-    local unsafe_mode=0
-
-    # Check for --unsafe flag
-    for arg in "$@"; do
-        if [ "$arg" = "--unsafe" ]; then
-            unsafe_mode=1
-            shift
-            break
-        fi
-    done
 
     if ! command -v jq &>/dev/null; then
         echo "jq is not installed"
@@ -87,19 +97,15 @@ function typo() {
         done
     fi
 
-    local messages=""
     if [ -z "$TYPO_CONVERSATION_HISTORY" ]; then
-        messages="[{\"role\": \"system\", \"content\": $(jq -Rn --arg content "$base_prompt" '$content')}]"
-    else
-        messages="$TYPO_CONVERSATION_HISTORY"
+        TYPO_CONVERSATION_HISTORY="[{\"role\": \"system\", \"content\": $(jq -Rn --arg content "$base_prompt" '$content')}]"
     fi
 
-    local user_message="{\"role\": \"user\", \"content\": $(jq -Rn --arg content "$input" '$content')}"
-    messages=$(jq -c ". + [$user_message]" <<< "$messages")
+    typo_add_to_conversation_history "user" "$input"
 
     local json_body='{
         "model": "gpt-4o",
-        "messages": '"${messages}"',
+        "messages": '"${TYPO_CONVERSATION_HISTORY}"',
         "temperature": 0
     }'
 
@@ -116,25 +122,28 @@ function typo() {
     fi
 
     local returned_command=$(printf "%s" "$response" | jq -r '.choices[0].message.content')
-    printf "%s\n" "$returned_command"
+    printf "%s\n" "$returned_command" >&2
 
-    local returned_command_json="{\"role\": \"assistant\", \"content\": $(jq -Rn --arg content "$returned_command" '$content')}"
-    TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$returned_command_json]" <<< "$messages")
+    typo_add_to_conversation_history "assistant" "$returned_command"
+
+    local command_output=""
 
     if [[ "$returned_command" =~ ^# ]]; then
-        echo ""
+        echo "" >&2
     else
-        if [ "$unsafe_mode" -eq 1 ]; then
-            eval "$returned_command"
+        if [ "${TYPO_UNSAFE_MODE:-0}" -eq 1 ]; then
+            typo_capture_output "$returned_command"
         else
-            echo "Run this command (y/n)?"
+            echo "Run this command (y/n)?" >&2
             if typo_get_user_confirmation; then
-                eval "$returned_command"
+                typo_capture_output "$returned_command"
             else
                 echo "Command not executed."
             fi
         fi
     fi
+
+    typo_add_to_conversation_history "user" "$command_output"
 
     echo "false" > ~/.typo_running
 }
