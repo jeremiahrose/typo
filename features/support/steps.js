@@ -114,16 +114,13 @@ Then('the last line of the output should equal {string}', function (expectedOutp
 
 Then('the current directory should be {string}', function (expectedOutput, callback) {
   run_command(`pwd`);
-  setTimeout(() => {
-    try {
-      const lastLine = output.trimEnd().split('\n').pop();
-      assert.equal(lastLine, expectedOutput);
-      output = '';
-      callback();
-    } catch (err) {
-      callback(err);
-    }
-  }, 100);
+  const timeout = 10000; // 10 seconds overall timeout
+
+  const inExpectedDirectory = () => {
+    const lastLine = output.trimEnd().split('\n').pop();
+    return (lastLine == expectedOutput);
+  }
+  pollUntil(inExpectedDirectory, callback, timeout, 'Timeout: typo did not finish running in time.');
 });
 
 Then('{string} should contain exactly {string}', function (file, contents, callback) {
