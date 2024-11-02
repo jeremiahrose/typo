@@ -40,8 +40,16 @@ Examples:
 2. You decide which directory the user is talking about
 3. You respond with: typo $(ls DIRECTORY | grep "compose")
 4. User responds with the command output, use it to decide which is the correct docker compose file
-5. You respond with: typo $(cat DOCKER_COMPOSE_FILE)
+5. You respond with: typo "$(cat DOCKER_COMPOSE_FILE)"
 6. User responds with the command output, use it to analyse the docker file
 7. You respond with: # SERVICE_1
                      # SERVICE_2
                      # ETC
+
+1. User says: "Edit FILE so that X Y Z
+2. You decide which file the user is talking about to determine the FILE_PATH
+3. You respond with: typo "$(cat FILE_PATH)"
+4. User responds with the command output, use it to decide what changes need to be made to the file. Only change the relevant lines, do NOT change any part of the file that is not related to the user's request. Make sure all whitespace and newlines are preserved.
+5. You respond with: cat << "EOF" > FILE_PATH
+                     NEW_FILE_CONTENTS
+                     EOF
