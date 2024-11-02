@@ -43,12 +43,10 @@ Run this command (y/n)? y
 - Asks for confirmation before running any command
 - Written for `zsh` but should also work in `bash`
 - Can return a sequence of commands and knows how to pipe command output to itself to obtain more information
-- Can be extended and customised in natural language by adding text files to the `active_prompts` directory
+- Can be extended and customised in natural language
 
 ## Limitations
-- `gpt-4o` has its limitations, for longer prompts it sometimes ignores some instructions
-- The prompts could be revised to be shorter and more effective
-- Needs to be tested in Linux / Bash!
+- A Usage tier 2 or higher OpenAI account is recommended for best results.
 
 ## Installation (MacOS)
 1. `brew tap jeremiahrose/typo`
@@ -59,6 +57,8 @@ Run this command (y/n)? y
 source /opt/homebrew/opt/typo/typo.sh
 # Export your OpenAI API key so typo can connect to GPT4o
 export OPENAI_API_KEY=your_key
+# Set a custom prompts directory
+export TYPO_CUSTOM_PROMPTS_DIR=your_custom_prompts_dir
 ```
-4. Customise behaviour by dragging prompts in/out of the `/opt/homebrew/opt/typo/active_prompts` directory
+4. Customise behaviour by adding prompts to your custom prompts directory specified by `TYPO_CUSTOM_PROMPTS_DIR`
 5. Upload your new and useful prompts as a PR to this repository :)
