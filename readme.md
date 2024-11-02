@@ -40,8 +40,7 @@ Run this command (y/n)? y
 - Uses the ChatGPT LLM to obtain shell commands to satisfy a request in natural language
 - Requires an OpenAI API account and token
 - Searches for files and apps and intelligently chooses the correct one
-- Automatically runs "safe" commands
-- Detects "dangerous" commands and asks for confirmation before running them
+- Asks for confirmation before running any command
 - Written for `zsh` but should also work in `bash`
 - Can return a sequence of commands and knows how to pipe command output to itself to obtain more information
 - Can be extended and customised in natural language by adding text files to the `active_prompts` directory
