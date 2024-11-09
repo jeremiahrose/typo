@@ -112,11 +112,7 @@ function typo() {
 
     local returned_command=""
 
-    curl -s https://api.openai.com/v1/chat/completions \
-    --no-buffer \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $OPENAI_API_KEY" \
-    -d "${json_body}" | while read -r line; do
+    while read -r line; do
 
         # Remove the 'data: ' prefix if present
         line="${line#data: }"
@@ -154,7 +150,11 @@ function typo() {
         printf '%s' "$content" >&2
 
         returned_command+="$content"
-    done
+    done < <(curl -s https://api.openai.com/v1/chat/completions \
+        --no-buffer \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $OPENAI_API_KEY" \
+        -d "${json_body}")
 
     # Add a newline to the output
     echo "" >&2
