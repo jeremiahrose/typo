@@ -106,23 +106,58 @@ function typo() {
     local json_body='{
         "model": "gpt-4o",
         "messages": '"${TYPO_CONVERSATION_HISTORY}"',
-        "temperature": 0
+        "temperature": 0,
+        "stream": true
     }'
 
-    local response=$(curl -s https://api.openai.com/v1/chat/completions \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $OPENAI_API_KEY" \
-    -d "${json_body}"
-    )
+    local returned_command=""
 
-    local error_message=$(printf "%s" "$response" | jq -r '.error.message // empty')
-    if [ -n "$error_message" ]; then
-        echo "Error from OpenAI: $error_message"
-        return 1
-    fi
+    while read -r line; do
 
-    local returned_command=$(printf "%s" "$response" | jq -r '.choices[0].message.content')
-    printf "%s\n" "$returned_command" >&2
+        # Remove the 'data: ' prefix if present
+        line="${line#data: }"
+
+        # Check for the end of the stream
+        if [ "$line" = "[DONE]" ]; then
+            break
+        fi
+
+        # Skip empty lines
+        if [ -z "$line" ]; then
+            continue
+        fi
+
+        # Check for errors in the JSON response
+        error_message=$(printf "%s" "$line" | jq -r '.error.message // empty')
+        if [ -n "$error_message" ]; then
+            echo "Error from OpenAI: $error_message" >&2
+            return 1
+        fi
+
+        # Extract the 'content' from the first choice
+        # Add an "x" and then strip it off so that trailing newlines are preserved: https://stackoverflow.com/a/15184414
+        local content=$(
+            printf "%s" "$line" | jq -r '.choices[0].delta.content // empty'
+            printf x
+        )
+        if [ ${#content} -ge 2 ]; then
+            content="${content:0:${#content}-2}"
+        else
+            content=""
+        fi
+
+        # Print the content to stderr as it is received
+        printf '%s' "$content" >&2
+
+        returned_command+="$content"
+    done < <(curl -s https://api.openai.com/v1/chat/completions \
+        --no-buffer \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $OPENAI_API_KEY" \
+        -d "${json_body}")
+
+    # Add a newline to the output
+    echo "" >&2
 
     typo_add_to_conversation_history "assistant" "$returned_command"
 

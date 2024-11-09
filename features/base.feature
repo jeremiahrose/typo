@@ -77,7 +77,7 @@ Feature: Basic terminal commands
     And typo has finished running
     And "/home/node/test/fib.csv" should contain exactly "1,2,2,3,4,6,9,14,22,35\n1,2,2,3,4,6,9,14,22,35\n1,2,2,3,4,6,9,14,22,35"
 
-    When the user runs "typo replace the 9 on the second line with 'prawn'"
+    When the user runs "typo replace the '9' on the second line with 'prawn'"
     Then typo should ask the user for confirmation to run a command
     When the user grants permission
     And typo has finished running
