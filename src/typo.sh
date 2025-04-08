@@ -8,6 +8,12 @@ else
     return 1
 fi
 
+# Start recording the terminal session, if not already recording
+if [[ -z "$terminal_log" ]]; then
+  export terminal_log=$(mktemp)
+  script -q -F $terminal_log
+fi
+
 function typo_get_user_confirmation() {
     if [ -n "$BASH_VERSION" ]; then
         read -t 0.2 -n 10 drain < /dev/tty
@@ -24,23 +30,14 @@ function typo_get_user_confirmation() {
     fi
 }
 
-function typo_capture_output() {
-  local tmpfile=$(mktemp)           # Make a temp file
-  exec 3>&1                        # Save the current stdout
-  exec 1> >(tee "$tmpfile")         # Copy stdout to the temporary file
-  eval "$*"                        # Run the command in the current shell
-  exec 1>&3                        # Restore stdout
-  sleep 1                          # Give tee a moment to finish writing to the temp file
-  command_output=$(cat "$tmpfile")  # Read the temp file into a variable
-  rm "$tmpfile"                     # Delete the temp file
-}
-
 function typo_add_to_conversation_history() {
     local role="$1"
     local message="$2"
     if [[ -z "$message" ]]; then
         return
     fi
+    # Strip null bytes and carriage returns
+    message=$(printf '%s' "$message" | tr -d '\0' | tr -d '\r')
     local message_json="{\"role\": \"$role\", \"content\": $(jq -Rn --arg content "$message" '$content')}"
     TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$message_json]" <<< "$TYPO_CONVERSATION_HISTORY")
 }
@@ -161,23 +158,25 @@ function typo() {
 
     typo_add_to_conversation_history "assistant" "$returned_command"
 
-    local command_output=""
+    # Clear the terminal log
+    : > $terminal_log
 
     if [[ "$returned_command" =~ ^# ]]; then
         echo "" >&2
     else
         if [ "${TYPO_UNSAFE_MODE:-0}" -eq 1 ]; then
-            typo_capture_output "$returned_command"
+            eval $returned_command
         else
             echo "Run this command (y/n)?" >&2
             if typo_get_user_confirmation; then
-                typo_capture_output "$returned_command"
+                eval $returned_command
             else
                 echo "Command not executed."
             fi
         fi
     fi
 
+    local command_output=$(cat $terminal_log)
     typo_add_to_conversation_history "user" "$command_output"
 
     echo "false" > ~/.typo_running
