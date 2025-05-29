@@ -8,12 +8,6 @@ else
     return 1
 fi
 
-# Start recording the terminal session, if not already recording
-if [[ -z "$terminal_log" ]]; then
-  export terminal_log=$(mktemp)
-  script -q -F $terminal_log
-fi
-
 function typo_get_user_confirmation() {
     if [ -n "$BASH_VERSION" ]; then
         read -t 0.2 -n 10 drain < /dev/tty
@@ -30,21 +24,19 @@ function typo_get_user_confirmation() {
     fi
 }
 
-function typo_add_to_conversation_history() {
-    local role="$1"
-    local message="$2"
-    if [[ -z "$message" ]]; then
-        return
-    fi
-    # Strip null bytes and carriage returns
-    message=$(printf '%s' "$message" | tr -d '\0' | tr -d '\r')
-    local message_json="{\"role\": \"$role\", \"content\": $(jq -Rn --arg content "$message" '$content')}"
-    TYPO_CONVERSATION_HISTORY=$(jq -c ". + [$message_json]" <<< "$TYPO_CONVERSATION_HISTORY")
+typo_previous_command_output=""
+function typo_capture_output() {
+  local tmpfile=$(mktemp)           # Make a temp file
+  exec 3>&1                        # Save the current stdout
+  exec 1> >(tee "$tmpfile")         # Copy stdout to the temporary file
+  eval "$*"                        # Run the command in the current shell
+  exec 1>&3                        # Restore stdout
+  sleep 1                          # Give tee a moment to finish writing to the temp file
+  typo_previous_command_output=$(cat "$tmpfile")  # Read the temp file into a variable
+  rm "$tmpfile"                     # Delete the temp file
 }
 
 function typo() {
-    echo "true" > ~/.typo_running
-
     if ! command -v jq &>/dev/null; then
         echo "jq is not installed"
         return 1
@@ -94,90 +86,24 @@ function typo() {
         done
     fi
 
-    if [ -z "$TYPO_CONVERSATION_HISTORY" ]; then
-        TYPO_CONVERSATION_HISTORY="[{\"role\": \"system\", \"content\": $(jq -Rn --arg content "$base_prompt" '$content')}]"
-    fi
+    local previous=${typo_previous_command_output:+$'The output of your previous command was: '"${typo_previous_command_output}"$'\n\n'}
+    local current="My next request is: ${input}"
 
-    typo_add_to_conversation_history "user" "$input"
-
-    local json_body='{
-        "model": "gpt-4o",
-        "messages": '"${TYPO_CONVERSATION_HISTORY}"',
-        "temperature": 0,
-        "stream": true
-    }'
-
-    local returned_command=""
-
-    while read -r line; do
-
-        # Remove the 'data: ' prefix if present
-        line="${line#data: }"
-
-        # Check for the end of the stream
-        if [ "$line" = "[DONE]" ]; then
-            break
-        fi
-
-        # Skip empty lines
-        if [ -z "$line" ]; then
-            continue
-        fi
-
-        # Check for errors in the JSON response
-        error_message=$(printf "%s" "$line" | jq -r '.error.message // empty')
-        if [ -n "$error_message" ]; then
-            echo "Error from OpenAI: $error_message" >&2
-            return 1
-        fi
-
-        # Extract the 'content' from the first choice
-        # Add an "x" and then strip it off so that trailing newlines are preserved: https://stackoverflow.com/a/15184414
-        local content=$(
-            printf "%s" "$line" | jq -r '.choices[0].delta.content // empty'
-            printf x
-        )
-        if [ ${#content} -ge 2 ]; then
-            content="${content:0:${#content}-2}"
-        else
-            content=""
-        fi
-
-        # Print the content to stderr as it is received
-        printf '%s' "$content" >&2
-
-        returned_command+="$content"
-    done < <(curl -s https://api.openai.com/v1/chat/completions \
-        --no-buffer \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $OPENAI_API_KEY" \
-        -d "${json_body}")
-
-    # Add a newline to the output
-    echo "" >&2
-
-    typo_add_to_conversation_history "assistant" "$returned_command"
-
-    # Clear the terminal log
-    : > $terminal_log
+    returned_command=`llm -c -m chatgpt-4o-latest "${previous}${current}" --system "$base_prompt"`
+    echo "$returned_command"
 
     if [[ "$returned_command" =~ ^# ]]; then
         echo "" >&2
     else
         if [ "${TYPO_UNSAFE_MODE:-0}" -eq 1 ]; then
-            eval $returned_command
+            typo_capture_output "$returned_command"
         else
             echo "Run this command (y/n)?" >&2
             if typo_get_user_confirmation; then
-                eval $returned_command
+                typo_capture_output "$returned_command"
             else
                 echo "Command not executed."
             fi
-        fi
+        # fi
     fi
-
-    local command_output=$(cat $terminal_log)
-    typo_add_to_conversation_history "user" "$command_output"
-
-    echo "false" > ~/.typo_running
 }
