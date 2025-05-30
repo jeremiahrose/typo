@@ -1,8 +1,8 @@
 # Determine the path to the installation directory when the typo function is sourced
 if [ -n "$BASH_VERSION" ]; then
-    TYPO_INSTALLATION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+    typo_installation_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 elif [ -n "$ZSH_VERSION" ]; then
-    TYPO_INSTALLATION_DIR="$(cd "$(dirname "${(%):-%N}")" &>/dev/null && pwd)"
+    typo_installation_dir="$(cd "$(dirname "${(%):-%N}")" &>/dev/null && pwd)"
 else
     echo "Unsupported shell" >&2
     return 1
@@ -24,7 +24,16 @@ function typo_get_user_confirmation() {
     fi
 }
 
-typo_previous_command_output=""
+function typo_get_audio_prompt() {
+    file_path="/tmp/typo/rec_$(uuidgen 2>/dev/null).mp3"
+    mkdir -p "$(dirname "$file_path")"
+    printf "Recording (q to stop)... " >&2
+    ffmpeg -y -loglevel quiet -nostats -f avfoundation -i ":0" -ac 1 -ar 44100 -codec:a libmp3lame -qscale:a 2 "$file_path" 2>/dev/null
+    echo "Done" >&2
+    printf "$file_path"
+}
+
+typo_command_output=""
 function typo_capture_output() {
   local tmpfile=$(mktemp)           # Make a temp file
   exec 3>&1                        # Save the current stdout
@@ -32,8 +41,16 @@ function typo_capture_output() {
   eval "$*"                        # Run the command in the current shell
   exec 1>&3                        # Restore stdout
   sleep 1                          # Give tee a moment to finish writing to the temp file
-  typo_previous_command_output=$(cat "$tmpfile")  # Read the temp file into a variable
+  typo_command_output=$(cat "$tmpfile")  # Read the temp file into a variable
   rm "$tmpfile"                     # Delete the temp file
+}
+
+typo_conversation_history="Conversation began as follows..."$'\n\n'
+function typo_add_to_conversation_history() {
+    local prompt="$1"
+    local command="$2"
+
+    typo_conversation_history="${typo_conversation_history}User said: $prompt"$'\n'"You responded with command: $command"$'\n\n'
 }
 
 function typo() {
@@ -47,6 +64,16 @@ function typo() {
         return 1
     fi
 
+    if ! command -v llm &>/dev/null; then
+        echo "llm is not installed"
+        return 1
+    fi
+
+    if ! command -v ffmpeg &>/dev/null; then
+        echo "ffmpeg is not installed"
+        return 1
+    fi
+
     if ! command -v fd &>/dev/null && ! command -v fdfind &>/dev/null; then
         echo "fd is not installed"
         return 1
@@ -56,12 +83,16 @@ function typo() {
         alias fdfind=fd
     fi
 
+    # Check for --audio argument
+    local audio_mode=false
+    [[ $1 == --audio ]] && { audio_mode=true; shift; }
+
     if [ "$#" -gt 0 ]; then
-        input="$*"
+        text_prompt="$*"
     elif [ -p /dev/stdin ]; then
-        input=$(cat)
+        text_prompt=$(cat)
     else
-        input=""
+        text_prompt=""
     fi
 
     if [ -z "$OPENAI_API_KEY" ]; then
@@ -69,7 +100,7 @@ function typo() {
         return 1
     fi
 
-    local prompts_dir="${TYPO_INSTALLATION_DIR}/active_prompts"
+    local prompts_dir="${typo_installation_dir}/active_prompts"
     local base_prompt=$(cat "${prompts_dir}/base.txt")
 
     for file in "${prompts_dir}"/*; do
@@ -86,11 +117,18 @@ function typo() {
         done
     fi
 
-    local previous=${typo_previous_command_output:+$'The output of your previous command was: '"${typo_previous_command_output}"$'\n\n'}
-    local current="My next request is: ${input}"
+    if $audio_mode; then
+        audio_prompt=$(typo_get_audio_prompt)
+        returned_command=`llm -m gpt-4o-audio-preview "${typo_conversation_history}" --system "$base_prompt" -a "$audio_prompt"`
+    else
+        current="User says: ${text_prompt}"
+        returned_command=`llm -m chatgpt-4o-latest "${typo_conversation_history}${current}" --system "$base_prompt"`
+    fi
 
-    returned_command=`llm -c -m chatgpt-4o-latest "${previous}${current}" --system "$base_prompt"`
     echo "$returned_command"
+
+    # TODO get model to transcribe prompt in audio mode
+    typo_add_to_conversation_history "$text_prompt" "$returned_command"
 
     if [[ "$returned_command" =~ ^# ]]; then
         echo "" >&2
@@ -104,6 +142,6 @@ function typo() {
             else
                 echo "Command not executed."
             fi
-        # fi
+        fi
     fi
 }
