@@ -24,6 +24,15 @@ function typo_get_user_confirmation() {
     fi
 }
 
+function typo_get_audio_prompt() {
+    file_path="/tmp/typo/rec_$(uuidgen 2>/dev/null).mp3"
+    mkdir -p "$(dirname "$file_path")"
+    echo "Recording (q to stop)..." >&2
+    ffmpeg -y -loglevel quiet -nostats -f avfoundation -i ":0" -ac 1 -ar 44100 -codec:a libmp3lame -qscale:a 2 "$file_path" 2>/dev/null
+    printf "$file_path"
+}
+
+typo_previous_command=""
 typo_previous_command_output=""
 function typo_capture_output() {
   local tmpfile=$(mktemp)           # Make a temp file
@@ -47,6 +56,16 @@ function typo() {
         return 1
     fi
 
+    if ! command -v llm &>/dev/null; then
+        echo "llm is not installed"
+        return 1
+    fi
+
+    if ! command -v ffmpeg &>/dev/null; then
+        echo "ffmpeg is not installed"
+        return 1
+    fi
+
     if ! command -v fd &>/dev/null && ! command -v fdfind &>/dev/null; then
         echo "fd is not installed"
         return 1
@@ -55,6 +74,10 @@ function typo() {
     if ! command -v fdfind &>/dev/null; then
         alias fdfind=fd
     fi
+
+    # Check for --audio argument
+    local audio_mode=false
+    [[ $1 == --audio ]] && { audio_mode=true; shift; }
 
     if [ "$#" -gt 0 ]; then
         input="$*"
@@ -86,11 +109,16 @@ function typo() {
         done
     fi
 
-    local previous=${typo_previous_command_output:+$'The output of your previous command was: '"${typo_previous_command_output}"$'\n\n'}
-    local current="My next request is: ${input}"
+    local previous_command=${typo_previous_command:+$'Your previous command was: '"${typo_previous_command}"$'\n\n'}
+    local previous_output=${typo_previous_command_output:+$'The output of your previous command was: '"${typo_previous_command_output}"$'\n\n'}
 
-    returned_command=`llm -c -m chatgpt-4o-latest "${previous}${current}" --system "$base_prompt"`
-    echo "$returned_command"
+    if $audio_mode; then
+        audio_prompt=$(typo_get_audio_prompt)
+        returned_command=`llm -m gpt-4o-audio-preview "${previous_command}${previous_output}" --system "$base_prompt" -a "$audio_prompt"`
+    else
+        current="My next request is: ${input}"
+        returned_command=`llm -m chatgpt-4o-latest "${previous_command}${previous_output}${current}" --system "$base_prompt"`
+    fi
 
     if [[ "$returned_command" =~ ^# ]]; then
         echo "" >&2
@@ -104,6 +132,8 @@ function typo() {
             else
                 echo "Command not executed."
             fi
-        # fi
+        fi
     fi
+
+    typo_previous_command=$returned_command
 }
