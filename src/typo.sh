@@ -27,8 +27,9 @@ function typo_get_user_confirmation() {
 function typo_get_audio_prompt() {
     file_path="/tmp/typo/rec_$(uuidgen 2>/dev/null).mp3"
     mkdir -p "$(dirname "$file_path")"
-    echo "Recording (q to stop)..." >&2
+    printf "Recording (q to stop)... " >&2
     ffmpeg -y -loglevel quiet -nostats -f avfoundation -i ":0" -ac 1 -ar 44100 -codec:a libmp3lame -qscale:a 2 "$file_path" 2>/dev/null
+    echo "Done" >&2
     printf "$file_path"
 }
 
@@ -123,6 +124,8 @@ function typo() {
         current="User says: ${text_prompt}"
         returned_command=`llm -m chatgpt-4o-latest "${typo_conversation_history}${current}" --system "$base_prompt"`
     fi
+
+    echo "$returned_command"
 
     # TODO get model to transcribe prompt in audio mode
     typo_add_to_conversation_history "$text_prompt" "$returned_command"
