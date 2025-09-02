@@ -41,16 +41,6 @@ from openai.types.beta.realtime.session import Session
 from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
 
 
-class SessionDisplay(Static):
-    """A widget that shows the current session ID."""
-
-    session_id = reactive("")
-
-    @override
-    def render(self) -> str:
-        return f"Session ID: {self.session_id}" if self.session_id else "Connecting..."
-
-
 class AudioStatusIndicator(Static):
     """A widget that shows the current audio recording status."""
 
@@ -96,7 +86,7 @@ class RealtimeApp(App[None]):
 
         #content-container {
             width: 100%;
-            height: 82%;  /* Reduced to make room for session display */
+            height: 90%;  /* Increased height since no session display */
         }
         
         #response-pane {
@@ -121,13 +111,6 @@ class RealtimeApp(App[None]):
             margin: 1 1;
         }
 
-        #session-display {
-            height: 3;
-            content-align: center middle;
-            background: #2a2b36;
-            border: solid rgb(91, 164, 91);
-            margin: 1 1;
-        }
 
         Static {
             color: white;
@@ -156,7 +139,6 @@ class RealtimeApp(App[None]):
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         with Container():
-            yield SessionDisplay(id="session-display")
             yield AudioStatusIndicator(id="status-indicator")
             with Horizontal(id="content-container"):
                 yield RichLog(id="response-pane", wrap=True, highlight=True, markup=True, min_width=30)
@@ -205,9 +187,6 @@ class RealtimeApp(App[None]):
             async for event in conn:
                 if event.type == "session.created":
                     self.session = event.session
-                    session_display = self.query_one(SessionDisplay)
-                    assert event.session.id is not None
-                    session_display.session_id = event.session.id
                     continue
 
                 if event.type == "session.updated":
