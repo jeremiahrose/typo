@@ -34,7 +34,7 @@ from audio_util import CHANNELS, SAMPLE_RATE, AudioPlayerAsync
 from textual.app import App, ComposeResult
 from textual.widgets import Button, Static, RichLog
 from textual.reactive import reactive
-from textual.containers import Container
+from textual.containers import Container, Horizontal
 
 from openai import AsyncOpenAI
 from openai.types.beta.realtime.session import Session
@@ -94,11 +94,23 @@ class RealtimeApp(App[None]):
             height: 3;  /* Explicit height for button */
         }
 
-        #bottom-pane {
+        #content-container {
             width: 100%;
             height: 82%;  /* Reduced to make room for session display */
+        }
+        
+        #response-pane {
+            width: 50%;
+            height: 100%;
             border: round rgb(205, 133, 63);
-            content-align: center middle;
+            margin-right: 1;
+        }
+        
+        #command-pane {
+            width: 50%;
+            height: 100%;
+            border: round rgb(91, 164, 91);
+            margin-left: 1;
         }
 
         #status-indicator {
@@ -146,11 +158,19 @@ class RealtimeApp(App[None]):
         with Container():
             yield SessionDisplay(id="session-display")
             yield AudioStatusIndicator(id="status-indicator")
-            yield RichLog(id="bottom-pane", wrap=True, highlight=True, markup=True)
+            with Horizontal(id="content-container"):
+                yield RichLog(id="response-pane", wrap=True, highlight=True, markup=True, min_width=30)
+                yield RichLog(id="command-pane", wrap=True, highlight=True, markup=True, min_width=30)
 
     async def on_mount(self) -> None:
         self.run_worker(self.handle_realtime_connection())
         self.run_worker(self.send_mic_audio())
+        
+        # Add labels to the panes
+        response_pane = self.query_one("#response-pane", RichLog)
+        command_pane = self.query_one("#command-pane", RichLog)
+        response_pane.write("[bold blue]📝 AI Responses[/bold blue]")
+        command_pane.write("[bold green]💻 Commands[/bold green]")
 
     async def handle_realtime_connection(self) -> None:
         async with self.client.beta.realtime.connect(model="gpt-4o-realtime-preview") as conn:
@@ -212,9 +232,10 @@ class RealtimeApp(App[None]):
                         acc_items[event.item_id] = text + event.delta
 
                     # Clear and update the entire content because RichLog otherwise treats each delta as a new line
-                    bottom_pane = self.query_one("#bottom-pane", RichLog)
-                    bottom_pane.clear()
-                    bottom_pane.write(acc_items[event.item_id])
+                    response_pane = self.query_one("#response-pane", RichLog)
+                    response_pane.clear()
+                    response_pane.write("[bold blue]📝 AI Responses[/bold blue]")
+                    response_pane.write(acc_items[event.item_id])
                     continue
 
                 if event.type == "response.done":
@@ -237,9 +258,9 @@ class RealtimeApp(App[None]):
             args = json.loads(function_call_item.arguments)
             command = args.get("command", "")
             
-            # Display command in the UI
-            bottom_pane = self.query_one("#bottom-pane", RichLog)
-            bottom_pane.write(f"\n💻 [bold cyan]Command:[/bold cyan] [yellow]{command}[/yellow]\n")
+            # Display command in the command pane
+            command_pane = self.query_one("#command-pane", RichLog)
+            command_pane.write(f"💻 [bold cyan]Command:[/bold cyan] [yellow]{command}[/yellow]")
             
             # Send function call result back to the model
             connection = await self._get_connection()
