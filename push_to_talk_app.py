@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import json
+import subprocess
 from typing import Any, cast
 from typing_extensions import override
 
@@ -241,13 +242,52 @@ class RealtimeApp(App[None]):
             command_pane = self.query_one("#command-pane", RichLog)
             command_pane.write(f"💻 [bold cyan]Command:[/bold cyan] [yellow]{command}[/yellow]")
             
+            # Execute the command
+            try:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                # Display the output
+                if result.stdout:
+                    command_pane.write(f"[green]✓ Output:[/green]")
+                    command_pane.write(f"[dim]{result.stdout.strip()}[/dim]")
+                
+                if result.stderr:
+                    command_pane.write(f"[red]⚠ Error:[/red]")
+                    command_pane.write(f"[dim red]{result.stderr.strip()}[/dim red]")
+                
+                # Show return code if non-zero
+                if result.returncode != 0:
+                    command_pane.write(f"[red]Exit code: {result.returncode}[/red]")
+                
+                command_result = {
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "returncode": result.returncode
+                }
+                
+            except subprocess.TimeoutExpired:
+                command_pane.write(f"[red]⚠ Command timed out (30s)[/red]")
+                command_result = {"error": "Command timed out after 30 seconds"}
+                
+            except Exception as e:
+                command_pane.write(f"[red]⚠ Error executing command: {str(e)}[/red]")
+                command_result = {"error": f"Failed to execute: {str(e)}"}
+            
+            command_pane.write("")  # Add blank line for spacing
+            
             # Send function call result back to the model
             connection = await self._get_connection()
             await connection.conversation.item.create(
                 item={
                     "type": "function_call_output",
                     "call_id": function_call_item.call_id,
-                    "output": json.dumps({"result": f"Command '{command}' received (not executed yet)"})
+                    "output": json.dumps(command_result)
                 }
             )
             
