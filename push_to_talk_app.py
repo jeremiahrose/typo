@@ -163,12 +163,17 @@ class RealtimeApp(App[None]):
                 "tools": [
                     {
                         "type": "function",
-                        "name": "ring_the_bell",
-                        "description": "Ring a bell to alert the user with a visual notification.",
+                        "name": "run_command",
+                        "description": "Execute a bash command on the user's system.",
                         "parameters": {
                             "type": "object",
-                            "properties": {},
-                            "required": []
+                            "properties": {
+                                "command": {
+                                    "type": "string",
+                                    "description": "The bash command to execute"
+                                }
+                            },
+                            "required": ["command"]
                         }
                     }
                 ],
@@ -227,10 +232,14 @@ class RealtimeApp(App[None]):
 
     async def handle_function_call(self, function_call_item: Any) -> None:
         """Handle function calls from the model."""
-        if function_call_item.name == "ring_the_bell":
-            # Display BELL text in the UI
+        if function_call_item.name == "run_command":
+            # Parse the function arguments
+            args = json.loads(function_call_item.arguments)
+            command = args.get("command", "")
+            
+            # Display command in the UI
             bottom_pane = self.query_one("#bottom-pane", RichLog)
-            bottom_pane.write("\n🔔 [bold yellow]BELL[/bold yellow] 🔔\n")
+            bottom_pane.write(f"\n💻 [bold cyan]Command:[/bold cyan] [yellow]{command}[/yellow]\n")
             
             # Send function call result back to the model
             connection = await self._get_connection()
@@ -238,7 +247,7 @@ class RealtimeApp(App[None]):
                 item={
                     "type": "function_call_output",
                     "call_id": function_call_item.call_id,
-                    "output": json.dumps({"result": "Bell rang successfully!"})
+                    "output": json.dumps({"result": f"Command '{command}' received (not executed yet)"})
                 }
             )
             
