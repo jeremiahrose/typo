@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import asyncio
+import json
 from typing import Any, cast
 from typing_extensions import override
 
@@ -156,9 +157,23 @@ class RealtimeApp(App[None]):
             self.connection = conn
             self.connected.set()
 
-            # note: this is the default and can be omitted
-            # if you want to manually handle VAD yourself, then set `'turn_detection': None`
-            await conn.session.update(session={"turn_detection": {"type": "server_vad"}})
+            # Configure session with function calling enabled
+            await conn.session.update(session={
+                "turn_detection": {"type": "server_vad"},
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "ring_the_bell",
+                        "description": "Ring a bell to alert the user with a visual notification.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                    }
+                ],
+                "tool_choice": "auto"
+            })
 
             acc_items: dict[str, Any] = {}
 
@@ -197,10 +212,38 @@ class RealtimeApp(App[None]):
                     bottom_pane.write(acc_items[event.item_id])
                     continue
 
+                if event.type == "response.done":
+                    # Check if response contains function calls
+                    if hasattr(event, 'response') and hasattr(event.response, 'output'):
+                        for output_item in event.response.output:
+                            if hasattr(output_item, 'type') and output_item.type == "function_call":
+                                await self.handle_function_call(output_item)
+                    continue
+
     async def _get_connection(self) -> AsyncRealtimeConnection:
         await self.connected.wait()
         assert self.connection is not None
         return self.connection
+
+    async def handle_function_call(self, function_call_item: Any) -> None:
+        """Handle function calls from the model."""
+        if function_call_item.name == "ring_the_bell":
+            # Display BELL text in the UI
+            bottom_pane = self.query_one("#bottom-pane", RichLog)
+            bottom_pane.write("\n🔔 [bold yellow]BELL[/bold yellow] 🔔\n")
+            
+            # Send function call result back to the model
+            connection = await self._get_connection()
+            await connection.conversation.item.create(
+                item={
+                    "type": "function_call_output",
+                    "call_id": function_call_item.call_id,
+                    "output": json.dumps({"result": "Bell rang successfully!"})
+                }
+            )
+            
+            # Generate a response from the model
+            await connection.response.create()
 
     async def send_mic_audio(self) -> None:
         import sounddevice as sd  # type: ignore
