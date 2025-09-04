@@ -337,6 +337,25 @@ class RealtimeApp:
         return self.connection
 
 
+    def get_sync_user_approval(self, tool_name: str, args: dict) -> bool:
+        """Get user approval for tool execution (sync version)."""
+        print(f"\n🔧 Tool Call Request: {tool_name}")
+        if args:
+            print(f"Arguments: {json.dumps(args, indent=2)}")
+        
+        while True:
+            try:
+                response = input("Approve this tool call? [y/N]: ").strip().lower()
+                if response in ['y', 'yes']:
+                    return True
+                elif response in ['n', 'no', '']:
+                    return False
+                else:
+                    print("Please enter 'y' for yes or 'n' for no.")
+            except (EOFError, KeyboardInterrupt):
+                print("\nTool call denied.")
+                return False
+
     async def handle_function_call(self, function_call_item: Any) -> None:
         """Handle function calls from the model."""
         tool_name = function_call_item.name
@@ -346,6 +365,23 @@ class RealtimeApp:
             args = json.loads(function_call_item.arguments)
         except json.JSONDecodeError:
             args = {}
+
+        # Get user approval for tool execution
+        approved = await asyncio.get_event_loop().run_in_executor(None, lambda: self.get_sync_user_approval(tool_name, args))
+        
+        if not approved:
+            print("❌ Tool call denied by user")
+            # Send denial result back to the model
+            connection = await self._get_connection()
+            await connection.conversation.item.create(
+                item={
+                    "type": "function_call_output",
+                    "call_id": function_call_item.call_id,
+                    "output": json.dumps({"error": "Tool call denied by user"})
+                }
+            )
+            await connection.response.create()
+            return
 
         if tool_name == "run_command":
             command = args.get("command", "")
