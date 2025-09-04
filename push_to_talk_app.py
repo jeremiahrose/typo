@@ -17,7 +17,7 @@
 #     "pydub",
 #     "sounddevice",
 #     "openai[realtime]",
-#     "mcp",
+#     "fastmcp",
 # ]
 #
 # ///
@@ -30,8 +30,7 @@ import subprocess
 import sys
 from typing import Any, cast
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from fastmcp import Client
 
 from audio_util import CHANNELS, SAMPLE_RATE, AudioPlayerAsync
 
@@ -42,69 +41,72 @@ from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
 
 class MCPClient:
     """MCP client for connecting to and managing MCP servers."""
-    
+
     def __init__(self):
         self.available_tools: list[dict] = []
-    
+        self.client = None
+
     async def connect_to_filesystem_server(self):
         """Connect to the MCP filesystem server."""
-        # Configure the filesystem server
-        server_params = StdioServerParameters(
-            command="npx",
-            args=["-y", "@modelcontextprotocol/server-filesystem", "/Users/jez/Personal Code/gpt-audio-control"],
-        )
-        
         print("Starting MCP server...")
-        # Use the proper async context manager pattern
-        async with stdio_client(server_params) as (read_stream, write_stream):
-            print("Creating session...")
-            async with ClientSession(read_stream, write_stream) as session:
-                print("Initializing session...")
-                await session.initialize()
-                
-                print("Discovering tools...")
-                # List available tools
-                result = await session.list_tools()
-                self.available_tools = []
-                
-                for tool in result.tools:
-                    # Convert MCP tool to OpenAI function format
-                    openai_tool = {
-                        "type": "function",
-                        "name": tool.name,
-                        "description": tool.description or f"MCP tool: {tool.name}",
-                        "parameters": tool.inputSchema or {"type": "object", "properties": {}, "required": []}
-                    }
-                    self.available_tools.append(openai_tool)
-                
-                print(f"Found {len(self.available_tools)} tools")
-                # We can't keep the session beyond this block, so we'll need to reconnect for tool calls
-                # Store connection info for reconnection
-                self._server_params = server_params
-    
+
+        # Create FastMCP client using multi-server configuration
+        config = {
+            "mcpServers": {
+                "filesystem": {
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/jez/Personal Code/gpt-audio-control"]
+                }
+            }
+        }
+
+        self.client = Client(config)
+
+        print("Discovering tools...")
+        # Connect and get available tools
+        async with self.client as client:
+            tools = await client.list_tools()
+            self.available_tools = []
+
+            for tool in tools:
+                # Convert MCP tool to OpenAI function format
+                openai_tool = {
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description or f"MCP tool: {tool.name}",
+                    "parameters": tool.inputSchema or {"type": "object", "properties": {}, "required": []}
+                }
+                self.available_tools.append(openai_tool)
+
+            print(f"Found {len(self.available_tools)} tools")
+
     async def call_tool(self, tool_name: str, arguments: dict) -> dict:
         """Execute a tool call on the MCP server."""
-        if not hasattr(self, '_server_params'):
+        if not self.client:
             return {"error": "No MCP server configured"}
-            
-        # Create a fresh connection for each tool call (proper MCP pattern)
-        async with stdio_client(self._server_params) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, arguments)
+
+        try:
+            async with self.client as client:
+                result = await client.call_tool(tool_name, arguments)
                 return {
                     "success": True,
-                    "content": result.content,
-                    "isError": result.isError
+                    "content": result.content if hasattr(result, 'content') else [{"type": "text", "text": str(result)}],
+                    "isError": False
                 }
-    
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "isError": True
+            }
+
     def serialize_mcp_result(self, result: dict) -> dict:
         """Convert MCP result to JSON-serializable format."""
         serializable_result = {
             "success": result.get("success", False),
             "isError": result.get("isError", False)
         }
-        
+
         # Convert content objects to strings
         content = result.get("content", [])
         content_strings = []
@@ -115,13 +117,13 @@ class MCPClient:
                 content_strings.append(item.get('text', ''))
             else:
                 content_strings.append(str(item))
-        
+
         serializable_result["content"] = "\n".join(content_strings) if content_strings else ""
-        
+
         # Add error if present
         if "error" in result:
             serializable_result["error"] = result["error"]
-            
+
         return serializable_result
 
     def print_result(self, tool_name: str, args: dict, result: dict) -> None:
@@ -129,12 +131,12 @@ class MCPClient:
         print(f"\n🔧 MCP Tool: {tool_name}")
         if args:
             print(f"Arguments: {args}")
-        
+
         # Display the result
         if result.get("success"):
             print("✓ Success")
             content = result.get("content", [])
-            
+
             for item in content:
                 if hasattr(item, 'type') and item.type == "text":
                     print(f"  {item.text}")
@@ -142,18 +144,19 @@ class MCPClient:
                     print(f"  {item.get('text', '')}")
                 else:
                     print(f"  {str(item)}")
-                    
+
             if result.get("isError"):
                 print("⚠ Tool reported an error")
         else:
             print("✗ Failed")
             error = result.get("error", "Unknown error")
             print(f"  {error}")
-        
+
         print()  # Add blank line for spacing
 
     async def close(self):
-        """Close the MCP client (nothing to cleanup with this pattern)."""
+        """Close the MCP client connection."""
+        # FastMCP Client uses async context managers, no explicit close needed
         pass
 
 
@@ -177,12 +180,12 @@ class RealtimeApp:
         print("🔊 GPT Audio Control - Terminal Version")
         print("Press 'k' + Enter to start/stop recording, 'q' + Enter to quit")
         print("" + "="*50)
-        
+
         # Start background tasks and keep references
         self.realtime_task = asyncio.create_task(self.handle_realtime_connection())
         self.audio_task = asyncio.create_task(self.send_mic_audio())
         self.mcp_task = asyncio.create_task(self.initialize_mcp())
-        
+
         try:
             # Handle user input
             await self.handle_input()
@@ -194,7 +197,7 @@ class RealtimeApp:
     async def cleanup(self) -> None:
         """Clean up background tasks and connections."""
         print("Cleaning up...")
-        
+
         # Cancel background tasks
         if hasattr(self, 'realtime_task'):
             self.realtime_task.cancel()
@@ -202,10 +205,10 @@ class RealtimeApp:
             self.audio_task.cancel()
         if hasattr(self, 'mcp_task'):
             self.mcp_task.cancel()
-        
+
         # Close MCP client
         await self.mcp_client.close()
-        
+
         # Wait for tasks to finish cancelling
         tasks = []
         if hasattr(self, 'realtime_task'):
@@ -214,14 +217,14 @@ class RealtimeApp:
             tasks.append(self.audio_task)
         if hasattr(self, 'mcp_task'):
             tasks.append(self.mcp_task)
-            
+
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def initialize_mcp(self) -> None:
         """Initialize MCP client connection."""
         print("Connecting to MCP filesystem server...")
-        
+
         try:
             await self.mcp_client.connect_to_filesystem_server()
             print(f"✓ MCP server connected with {len(self.mcp_client.available_tools)} tools")
@@ -241,7 +244,7 @@ class RealtimeApp:
                 while not self.mcp_client.available_tools and wait_count < max_wait:
                     await asyncio.sleep(1)
                     wait_count += 1
-                
+
                 # Configure session with MCP tools and built-in commands
                 tools = [
                     {
@@ -260,10 +263,10 @@ class RealtimeApp:
                         }
                     }
                 ]
-                
+
                 # Add MCP tools if available
                 tools.extend(self.mcp_client.available_tools)
-                
+
                 await conn.session.update(session={
                     "turn_detection": {"type": "server_vad"},
                     "tools": tools,
@@ -295,7 +298,7 @@ class RealtimeApp:
                         if not self.response_started:
                             print("🤖 AI: ", end="", flush=True)
                             self.response_started = True
-                        
+
                         # Simply print the delta text (new characters only)
                         print(event.delta, end="", flush=True)
                         continue
@@ -305,7 +308,7 @@ class RealtimeApp:
                         if self.response_started:
                             print()  # Move to new line after streaming is complete
                             self.response_started = False
-                            
+
                         # Check if response contains function calls
                         if hasattr(event, 'response') and hasattr(event.response, 'output'):
                             for output_item in event.response.output:
@@ -327,19 +330,19 @@ class RealtimeApp:
     async def handle_function_call(self, function_call_item: Any) -> None:
         """Handle function calls from the model."""
         tool_name = function_call_item.name
-        
+
         # Parse the function arguments
         try:
             args = json.loads(function_call_item.arguments)
         except json.JSONDecodeError:
             args = {}
-        
+
         if tool_name == "run_command":
             command = args.get("command", "")
-            
+
             # Display command
             print(f"\n💻 Command: {command}")
-            
+
             # Execute the command
             try:
                 result = subprocess.run(
@@ -349,36 +352,36 @@ class RealtimeApp:
                     text=True,
                     timeout=30
                 )
-                
+
                 # Display the output
                 if result.stdout:
                     print("✓ Output:")
                     print(f"  {result.stdout.strip()}")
-                
+
                 if result.stderr:
                     print("⚠ Error:")
                     print(f"  {result.stderr.strip()}")
-                
+
                 # Show return code if non-zero
                 if result.returncode != 0:
                     print(f"Exit code: {result.returncode}")
-                
+
                 command_result = {
                     "stdout": result.stdout,
                     "stderr": result.stderr,
                     "returncode": result.returncode
                 }
-                
+
             except subprocess.TimeoutExpired:
                 print("⚠ Command timed out (30s)")
                 command_result = {"error": "Command timed out after 30 seconds"}
-                
+
             except Exception as e:
                 print(f"⚠ Error executing command: {str(e)}")
                 command_result = {"error": f"Failed to execute: {str(e)}"}
-            
+
             print()  # Add blank line for spacing
-            
+
             # Send function call result back to the model
             connection = await self._get_connection()
             await connection.conversation.item.create(
@@ -388,18 +391,18 @@ class RealtimeApp:
                     "output": json.dumps(command_result)
                 }
             )
-            
+
             # Generate a response from the model
             await connection.response.create()
-            
+
         else:
             # Handle MCP tool calls
             # Execute the MCP tool
             result = await self.mcp_client.call_tool(tool_name, args)
-            
+
             # Display the result
             self.mcp_client.print_result(tool_name, args, result)
-            
+
             # Send function call result back to the model
             connection = await self._get_connection()
             await connection.conversation.item.create(
@@ -409,7 +412,7 @@ class RealtimeApp:
                     "output": json.dumps(self.mcp_client.serialize_mcp_result(result))
                 }
             )
-            
+
             # Generate a response from the model
             await connection.response.create()
 
@@ -463,30 +466,30 @@ class RealtimeApp:
     async def handle_input(self) -> None:
         """Handle user input from terminal."""
         import asyncio
-        
+
         loop = asyncio.get_event_loop()
-        
+
         def get_input():
             return input()
-        
+
         try:
             while True:
                 status = "🔴 Recording... (Press 'k' + Enter to stop)" if self.is_recording else "⚪ Press 'k' + Enter to start recording ('q' + Enter to quit)"
                 print(f"\n{status}")
-                
+
                 try:
                     user_input = await loop.run_in_executor(None, get_input)
-                    
+
                     if user_input == "q":
                         print("Goodbye!")
                         return
-                    
+
                     if user_input == "k":
                         if self.is_recording:
                             self.should_send_audio.clear()
                             self.is_recording = False
                             print("⏹ Recording stopped")
-                            
+
                             if self.session and self.session.turn_detection is None:
                                 # The default in the API is that the model will automatically detect when the user has
                                 # stopped talking and then start responding itself.
@@ -500,10 +503,10 @@ class RealtimeApp:
                             self.should_send_audio.set()
                             self.is_recording = True
                             print("▶️ Recording started")
-                            
+
                 except EOFError:
                     break
-                    
+
         except KeyboardInterrupt:
             print("\nGoodbye!")
 
