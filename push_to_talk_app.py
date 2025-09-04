@@ -43,31 +43,27 @@ class MCPClient:
 
     async def connect_to_mcp_servers(self):
         """Connect to MCP servers defined in configuration."""
-        print("Starting MCP servers...")
-
         # Load configuration from mcp.json file
         try:
             with open("mcp.json", "r") as f:
                 config = json.load(f)
-            print("✓ Loaded MCP configuration from mcp.json")
         except FileNotFoundError:
-            print("⚠ mcp.json not found, using empty configuration")
+            print("❌ mcp.json not found, not using any MCP servers")
             config = {
                 "mcpServers": {}
             }
         except json.JSONDecodeError as e:
-            print(f"✗ Error parsing mcp.json: {e}")
+            print(f"❌ mcp.json parsing error: {e}")
             raise
 
         # Create and validate client with FastMCP
         try:
             self.client = Client(config)
-            print("✓ FastMCP configuration validated")
+            print("✅ Loaded mcp.json")
         except Exception as e:
-            print(f"✗ FastMCP configuration validation failed: {e}")
+            print(f"❌ mcp.json validation failed: {e}")
             raise
 
-        print("Discovering tools...")
         # Connect and get available tools
         async with self.client as client:
             tools = await client.list_tools()
@@ -82,8 +78,6 @@ class MCPClient:
                     "parameters": tool.inputSchema or {"type": "object", "properties": {}, "required": []}
                 }
                 self.available_tools.append(openai_tool)
-
-            print(f"Found {len(self.available_tools)} tools")
 
     async def call_tool(self, tool_name: str, arguments: dict) -> dict:
         """Execute a tool call on the MCP server."""
@@ -133,13 +127,13 @@ class MCPClient:
 
     def print_result(self, tool_name: str, args: dict, result: dict) -> None:
         """Print MCP tool execution result to terminal."""
-        print(f"\n🔧 MCP Tool: {tool_name}")
+        print(f"🔧 MCP Tool: {tool_name}")
         if args:
             print(f"Arguments: {args}")
 
         # Display the result
         if result.get("success"):
-            print("✓ Success")
+            print("✅ Success")
             content = result.get("content", [])
 
             for item in content:
@@ -183,7 +177,7 @@ class RealtimeApp:
 
     async def start(self) -> None:
         """Start the application."""
-        print("🔊 GPT Audio Control - Terminal Version")
+        print("🐜 typo is here to do your bidding")
         print("" + "="*50)
 
         # Start background tasks and keep references
@@ -201,7 +195,7 @@ class RealtimeApp:
 
     async def cleanup(self) -> None:
         """Clean up background tasks and connections."""
-        print("Cleaning up...")
+        print("\n🧹 Cleaning up...")
 
         # Cancel background tasks
         if hasattr(self, 'realtime_task'):
@@ -228,11 +222,9 @@ class RealtimeApp:
 
     async def initialize_mcp(self) -> None:
         """Initialize MCP client connection."""
-        print("Connecting to MCP servers...")
-
         try:
             await self.mcp_client.connect_to_mcp_servers()
-            print(f"✓ MCP servers connected with {len(self.mcp_client.available_tools)} tools")
+            print(f"✅ MCP servers connected with {len(self.mcp_client.available_tools)} tools")
         except Exception as e:
             print(f"✗ MCP connection failed: {e}")
             # Don't let MCP failure stop the app
@@ -432,7 +424,7 @@ class RealtimeApp:
 
         # Show initial recording prompt
         recording_prompt = "🔴 Press 'k' + Enter to start recording ('q' + Enter to quit)"
-        print(f"\n{recording_prompt}")
+        print(f"{recording_prompt}")
 
         try:
             while True:
