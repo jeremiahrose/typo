@@ -56,83 +56,114 @@ class RealtimeApp:
         print("Press 'k' + Enter to start/stop recording, 'q' + Enter to quit")
         print("" + "="*50)
         
-        # Start background tasks
-        asyncio.create_task(self.handle_realtime_connection())
-        asyncio.create_task(self.send_mic_audio())
+        # Start background tasks and keep references
+        self.realtime_task = asyncio.create_task(self.handle_realtime_connection())
+        self.audio_task = asyncio.create_task(self.send_mic_audio())
         
-        # Handle user input
-        await self.handle_input()
+        try:
+            # Handle user input
+            await self.handle_input()
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+        finally:
+            await self.cleanup()
+
+    async def cleanup(self) -> None:
+        """Clean up background tasks and connections."""
+        print("Cleaning up...")
+        
+        # Cancel background tasks
+        if hasattr(self, 'realtime_task'):
+            self.realtime_task.cancel()
+        if hasattr(self, 'audio_task'):
+            self.audio_task.cancel()
+        
+        # Wait for tasks to finish cancelling
+        tasks = []
+        if hasattr(self, 'realtime_task'):
+            tasks.append(self.realtime_task)
+        if hasattr(self, 'audio_task'):
+            tasks.append(self.audio_task)
+            
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def handle_realtime_connection(self) -> None:
-        async with self.client.beta.realtime.connect(model="gpt-4o-realtime-preview") as conn:
-            self.connection = conn
-            self.connected.set()
+        try:
+            async with self.client.beta.realtime.connect(model="gpt-4o-realtime-preview") as conn:
+                self.connection = conn
+                self.connected.set()
 
-            # Configure session with function calling enabled
-            await conn.session.update(session={
-                "turn_detection": {"type": "server_vad"},
-                "tools": [
-                    {
-                        "type": "function",
-                        "name": "run_command",
-                        "description": "Execute a bash command on the user's system.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "command": {
-                                    "type": "string",
-                                    "description": "The bash command to execute"
-                                }
-                            },
-                            "required": ["command"]
+                # Configure session with function calling enabled
+                await conn.session.update(session={
+                    "turn_detection": {"type": "server_vad"},
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "run_command",
+                            "description": "Execute a bash command on the user's system.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "command": {
+                                        "type": "string",
+                                        "description": "The bash command to execute"
+                                    }
+                                },
+                                "required": ["command"]
+                            }
                         }
-                    }
-                ],
-                "tool_choice": "auto"
-            })
+                    ],
+                    "tool_choice": "auto"
+                })
 
-            acc_items: dict[str, Any] = {}
+                acc_items: dict[str, Any] = {}
 
-            async for event in conn:
-                if event.type == "session.created":
-                    self.session = event.session
-                    continue
+                async for event in conn:
+                    if event.type == "session.created":
+                        self.session = event.session
+                        continue
 
-                if event.type == "session.updated":
-                    self.session = event.session
-                    continue
+                    if event.type == "session.updated":
+                        self.session = event.session
+                        continue
 
-                if event.type == "response.audio.delta":
-                    if event.item_id != self.last_audio_item_id:
-                        self.audio_player.reset_frame_count()
-                        self.last_audio_item_id = event.item_id
+                    if event.type == "response.audio.delta":
+                        if event.item_id != self.last_audio_item_id:
+                            self.audio_player.reset_frame_count()
+                            self.last_audio_item_id = event.item_id
 
-                    bytes_data = base64.b64decode(event.delta)
-                    self.audio_player.add_data(bytes_data)
-                    continue
+                        bytes_data = base64.b64decode(event.delta)
+                        self.audio_player.add_data(bytes_data)
+                        continue
 
-                if event.type == "response.audio_transcript.delta":
-                    # Print the AI prefix only once when starting a new response
-                    if not self.response_started:
-                        print("🤖 AI: ", end="", flush=True)
-                        self.response_started = True
-                    
-                    # Simply print the delta text (new characters only)
-                    print(event.delta, end="", flush=True)
-                    continue
-
-                if event.type == "response.done":
-                    # Print newline after response is complete
-                    if self.response_started:
-                        print()  # Move to new line after streaming is complete
-                        self.response_started = False
+                    if event.type == "response.audio_transcript.delta":
+                        # Print the AI prefix only once when starting a new response
+                        if not self.response_started:
+                            print("🤖 AI: ", end="", flush=True)
+                            self.response_started = True
                         
-                    # Check if response contains function calls
-                    if hasattr(event, 'response') and hasattr(event.response, 'output'):
-                        for output_item in event.response.output:
-                            if hasattr(output_item, 'type') and output_item.type == "function_call":
-                                await self.handle_function_call(output_item)
-                    continue
+                        # Simply print the delta text (new characters only)
+                        print(event.delta, end="", flush=True)
+                        continue
+
+                    if event.type == "response.done":
+                        # Print newline after response is complete
+                        if self.response_started:
+                            print()  # Move to new line after streaming is complete
+                            self.response_started = False
+                            
+                        # Check if response contains function calls
+                        if hasattr(event, 'response') and hasattr(event.response, 'output'):
+                            for output_item in event.response.output:
+                                if hasattr(output_item, 'type') and output_item.type == "function_call":
+                                    await self.handle_function_call(output_item)
+                        continue
+        except asyncio.CancelledError:
+            # Task was cancelled, exit gracefully
+            pass
+        except Exception as e:
+            print(f"Realtime connection error: {e}")
 
     async def _get_connection(self) -> AsyncRealtimeConnection:
         await self.connected.wait()
@@ -237,8 +268,13 @@ class RealtimeApp:
                 await connection.input_audio_buffer.append(audio=base64.b64encode(cast(Any, data)).decode("utf-8"))
 
                 await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            # Task was cancelled, exit gracefully
+            pass
         except KeyboardInterrupt:
             pass
+        except Exception as e:
+            print(f"Audio error: {e}")
         finally:
             stream.stop()
             stream.close()
@@ -293,7 +329,13 @@ class RealtimeApp:
 
 async def main():
     app = RealtimeApp()
-    await app.start()
+    try:
+        await app.start()
+    except KeyboardInterrupt:
+        print("\nGoodbye!")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass  # Graceful shutdown
