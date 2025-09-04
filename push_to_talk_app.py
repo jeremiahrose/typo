@@ -46,21 +46,31 @@ class MCPClient:
         self.available_tools: list[dict] = []
         self.client = None
 
-    async def connect_to_filesystem_server(self):
-        """Connect to the MCP filesystem server."""
-        print("Starting MCP server...")
+    async def connect_to_mcp_servers(self):
+        """Connect to MCP servers defined in configuration."""
+        print("Starting MCP servers...")
 
-        # Create FastMCP client using multi-server configuration
-        config = {
-            "mcpServers": {
-                "filesystem": {
-                    "command": "npx",
-                    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/jez/Personal Code/gpt-audio-control"]
-                }
+        # Load configuration from mcp.json file
+        try:
+            with open("mcp.json", "r") as f:
+                config = json.load(f)
+            print("✓ Loaded MCP configuration from mcp.json")
+        except FileNotFoundError:
+            print("⚠ mcp.json not found, using empty configuration")
+            config = {
+                "mcpServers": {}
             }
-        }
+        except json.JSONDecodeError as e:
+            print(f"✗ Error parsing mcp.json: {e}")
+            raise
 
-        self.client = Client(config)
+        # Create and validate client with FastMCP
+        try:
+            self.client = Client(config)
+            print("✓ FastMCP configuration validated")
+        except Exception as e:
+            print(f"✗ FastMCP configuration validation failed: {e}")
+            raise
 
         print("Discovering tools...")
         # Connect and get available tools
@@ -223,11 +233,11 @@ class RealtimeApp:
 
     async def initialize_mcp(self) -> None:
         """Initialize MCP client connection."""
-        print("Connecting to MCP filesystem server...")
+        print("Connecting to MCP servers...")
 
         try:
-            await self.mcp_client.connect_to_filesystem_server()
-            print(f"✓ MCP server connected with {len(self.mcp_client.available_tools)} tools")
+            await self.mcp_client.connect_to_mcp_servers()
+            print(f"✓ MCP servers connected with {len(self.mcp_client.available_tools)} tools")
         except Exception as e:
             print(f"✗ MCP connection failed: {e}")
             # Don't let MCP failure stop the app
