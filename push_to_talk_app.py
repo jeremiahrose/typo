@@ -17,6 +17,7 @@
 #     "pydub",
 #     "sounddevice",
 #     "openai[realtime]",
+#     "mcp",
 # ]
 #
 # ///
@@ -29,11 +30,131 @@ import subprocess
 import sys
 from typing import Any, cast
 
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
 from audio_util import CHANNELS, SAMPLE_RATE, AudioPlayerAsync
 
 from openai import AsyncOpenAI
 from openai.types.beta.realtime.session import Session
 from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
+
+
+class MCPClient:
+    """MCP client for connecting to and managing MCP servers."""
+    
+    def __init__(self):
+        self.available_tools: list[dict] = []
+    
+    async def connect_to_filesystem_server(self):
+        """Connect to the MCP filesystem server."""
+        # Configure the filesystem server
+        server_params = StdioServerParameters(
+            command="npx",
+            args=["-y", "@modelcontextprotocol/server-filesystem", "/Users/jez/Personal Code/gpt-audio-control"],
+        )
+        
+        print("Starting MCP server...")
+        # Use the proper async context manager pattern
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            print("Creating session...")
+            async with ClientSession(read_stream, write_stream) as session:
+                print("Initializing session...")
+                await session.initialize()
+                
+                print("Discovering tools...")
+                # List available tools
+                result = await session.list_tools()
+                self.available_tools = []
+                
+                for tool in result.tools:
+                    # Convert MCP tool to OpenAI function format
+                    openai_tool = {
+                        "type": "function",
+                        "name": tool.name,
+                        "description": tool.description or f"MCP tool: {tool.name}",
+                        "parameters": tool.inputSchema or {"type": "object", "properties": {}, "required": []}
+                    }
+                    self.available_tools.append(openai_tool)
+                
+                print(f"Found {len(self.available_tools)} tools")
+                # We can't keep the session beyond this block, so we'll need to reconnect for tool calls
+                # Store connection info for reconnection
+                self._server_params = server_params
+    
+    async def call_tool(self, tool_name: str, arguments: dict) -> dict:
+        """Execute a tool call on the MCP server."""
+        if not hasattr(self, '_server_params'):
+            return {"error": "No MCP server configured"}
+            
+        # Create a fresh connection for each tool call (proper MCP pattern)
+        async with stdio_client(self._server_params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+                return {
+                    "success": True,
+                    "content": result.content,
+                    "isError": result.isError
+                }
+    
+    def serialize_mcp_result(self, result: dict) -> dict:
+        """Convert MCP result to JSON-serializable format."""
+        serializable_result = {
+            "success": result.get("success", False),
+            "isError": result.get("isError", False)
+        }
+        
+        # Convert content objects to strings
+        content = result.get("content", [])
+        content_strings = []
+        for item in content:
+            if hasattr(item, 'type') and item.type == "text":
+                content_strings.append(item.text)
+            elif isinstance(item, dict) and item.get("type") == "text":
+                content_strings.append(item.get('text', ''))
+            else:
+                content_strings.append(str(item))
+        
+        serializable_result["content"] = "\n".join(content_strings) if content_strings else ""
+        
+        # Add error if present
+        if "error" in result:
+            serializable_result["error"] = result["error"]
+            
+        return serializable_result
+
+    def print_result(self, tool_name: str, args: dict, result: dict) -> None:
+        """Print MCP tool execution result to terminal."""
+        print(f"\n🔧 MCP Tool: {tool_name}")
+        if args:
+            print(f"Arguments: {args}")
+        
+        # Display the result
+        if result.get("success"):
+            print("✓ Success")
+            content = result.get("content", [])
+            
+            for item in content:
+                if hasattr(item, 'type') and item.type == "text":
+                    print(f"  {item.text}")
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    print(f"  {item.get('text', '')}")
+                else:
+                    print(f"  {str(item)}")
+                    
+            if result.get("isError"):
+                print("⚠ Tool reported an error")
+        else:
+            print("✗ Failed")
+            error = result.get("error", "Unknown error")
+            print(f"  {error}")
+        
+        print()  # Add blank line for spacing
+
+    async def close(self):
+        """Close the MCP client (nothing to cleanup with this pattern)."""
+        pass
 
 
 class RealtimeApp:
@@ -46,6 +167,7 @@ class RealtimeApp:
         self.last_audio_item_id = None
         self.should_send_audio = asyncio.Event()
         self.connected = asyncio.Event()
+        self.mcp_client = MCPClient()
         self.is_recording = False
         self.response_started = False
 
@@ -59,6 +181,7 @@ class RealtimeApp:
         # Start background tasks and keep references
         self.realtime_task = asyncio.create_task(self.handle_realtime_connection())
         self.audio_task = asyncio.create_task(self.send_mic_audio())
+        self.mcp_task = asyncio.create_task(self.initialize_mcp())
         
         try:
             # Handle user input
@@ -77,6 +200,11 @@ class RealtimeApp:
             self.realtime_task.cancel()
         if hasattr(self, 'audio_task'):
             self.audio_task.cancel()
+        if hasattr(self, 'mcp_task'):
+            self.mcp_task.cancel()
+        
+        # Close MCP client
+        await self.mcp_client.close()
         
         # Wait for tasks to finish cancelling
         tasks = []
@@ -84,9 +212,22 @@ class RealtimeApp:
             tasks.append(self.realtime_task)
         if hasattr(self, 'audio_task'):
             tasks.append(self.audio_task)
+        if hasattr(self, 'mcp_task'):
+            tasks.append(self.mcp_task)
             
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def initialize_mcp(self) -> None:
+        """Initialize MCP client connection."""
+        print("Connecting to MCP filesystem server...")
+        
+        try:
+            await self.mcp_client.connect_to_filesystem_server()
+            print(f"✓ MCP server connected with {len(self.mcp_client.available_tools)} tools")
+        except Exception as e:
+            print(f"✗ MCP connection failed: {e}")
+            # Don't let MCP failure stop the app
 
     async def handle_realtime_connection(self) -> None:
         try:
@@ -94,26 +235,38 @@ class RealtimeApp:
                 self.connection = conn
                 self.connected.set()
 
-                # Configure session with function calling enabled
+                # Wait for MCP client to be ready
+                max_wait = 10  # seconds
+                wait_count = 0
+                while not self.mcp_client.available_tools and wait_count < max_wait:
+                    await asyncio.sleep(1)
+                    wait_count += 1
+                
+                # Configure session with MCP tools and built-in commands
+                tools = [
+                    {
+                        "type": "function",
+                        "name": "run_command",
+                        "description": "Execute a bash command on the user's system.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "command": {
+                                    "type": "string",
+                                    "description": "The bash command to execute"
+                                }
+                            },
+                            "required": ["command"]
+                        }
+                    }
+                ]
+                
+                # Add MCP tools if available
+                tools.extend(self.mcp_client.available_tools)
+                
                 await conn.session.update(session={
                     "turn_detection": {"type": "server_vad"},
-                    "tools": [
-                        {
-                            "type": "function",
-                            "name": "run_command",
-                            "description": "Execute a bash command on the user's system.",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "The bash command to execute"
-                                    }
-                                },
-                                "required": ["command"]
-                            }
-                        }
-                    ],
+                    "tools": tools,
                     "tool_choice": "auto"
                 })
 
@@ -170,11 +323,18 @@ class RealtimeApp:
         assert self.connection is not None
         return self.connection
 
+
     async def handle_function_call(self, function_call_item: Any) -> None:
         """Handle function calls from the model."""
-        if function_call_item.name == "run_command":
-            # Parse the function arguments
+        tool_name = function_call_item.name
+        
+        # Parse the function arguments
+        try:
             args = json.loads(function_call_item.arguments)
+        except json.JSONDecodeError:
+            args = {}
+        
+        if tool_name == "run_command":
             command = args.get("command", "")
             
             # Display command
@@ -226,6 +386,27 @@ class RealtimeApp:
                     "type": "function_call_output",
                     "call_id": function_call_item.call_id,
                     "output": json.dumps(command_result)
+                }
+            )
+            
+            # Generate a response from the model
+            await connection.response.create()
+            
+        else:
+            # Handle MCP tool calls
+            # Execute the MCP tool
+            result = await self.mcp_client.call_tool(tool_name, args)
+            
+            # Display the result
+            self.mcp_client.print_result(tool_name, args, result)
+            
+            # Send function call result back to the model
+            connection = await self._get_connection()
+            await connection.conversation.item.create(
+                item={
+                    "type": "function_call_output",
+                    "call_id": function_call_item.call_id,
+                    "output": json.dumps(self.mcp_client.serialize_mcp_result(result))
                 }
             )
             
