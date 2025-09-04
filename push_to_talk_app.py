@@ -379,8 +379,8 @@ class RealtimeApp:
 
         sent_audio = False
 
-        device_info = sd.query_devices()
-        print(device_info)
+        # Query devices but don't print the list
+        sd.query_devices()
 
         read_size = int(SAMPLE_RATE * 0.02)
 
