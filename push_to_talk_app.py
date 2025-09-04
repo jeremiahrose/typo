@@ -59,7 +59,7 @@ class MCPClient:
         # Create and validate client with FastMCP
         try:
             self.client = Client(config)
-            print("✅ Loaded mcp.json")
+            print("🐜 loaded mcp.json")
         except Exception as e:
             print(f"❌ mcp.json validation failed: {e}")
             raise
@@ -127,13 +127,13 @@ class MCPClient:
 
     def print_result(self, tool_name: str, args: dict, result: dict) -> None:
         """Print MCP tool execution result to terminal."""
-        print(f"🔧 MCP Tool: {tool_name}")
+        print(f"🐜 mcp tool: {tool_name}")
         if args:
-            print(f"Arguments: {args}")
+            print(f"arguments: {args}")
 
         # Display the result
         if result.get("success"):
-            print("✅ Success")
+            print("🐜 success")
             content = result.get("content", [])
 
             for item in content:
@@ -145,9 +145,9 @@ class MCPClient:
                     print(f"  {str(item)}")
 
             if result.get("isError"):
-                print("⚠ Tool reported an error")
+                print("🐜 tool reported an error")
         else:
-            print("✗ Failed")
+            print("❌ failed")
             error = result.get("error", "Unknown error")
             print(f"  {error}")
 
@@ -189,13 +189,13 @@ class RealtimeApp:
             # Handle user input
             await self.handle_input()
         except KeyboardInterrupt:
-            print("\nShutting down...")
+            print("\n🐜 shutting down...")
         finally:
             await self.cleanup()
 
     async def cleanup(self) -> None:
         """Clean up background tasks and connections."""
-        print("\n🧹 Cleaning up...")
+        print("\n🐜 cleaning up...")
 
         # Cancel background tasks
         if hasattr(self, 'realtime_task'):
@@ -224,9 +224,9 @@ class RealtimeApp:
         """Initialize MCP client connection."""
         try:
             await self.mcp_client.connect_to_mcp_servers()
-            print(f"✅ MCP servers connected with {len(self.mcp_client.available_tools)} tools")
+            print(f"🐜 MCP servers connected with {len(self.mcp_client.available_tools)} tools")
         except Exception as e:
-            print(f"✗ MCP connection failed: {e}")
+            print(f"❌ MCP connection failed: {e}")
             # Don't let MCP failure stop the app
 
     async def handle_realtime_connection(self) -> None:
@@ -274,7 +274,7 @@ class RealtimeApp:
                     if event.type == "response.audio_transcript.delta":
                         # Print the AI prefix only once when starting a new response
                         if not self.response_started:
-                            print("🤖 AI: ", end="", flush=True)
+                            print("🐜 ai: ", end="", flush=True)
                             self.response_started = True
 
                         # Simply print the delta text (new characters only)
@@ -297,7 +297,7 @@ class RealtimeApp:
             # Task was cancelled, exit gracefully
             pass
         except Exception as e:
-            print(f"Realtime connection error: {e}")
+            print(f"❌ realtime connection error: {e}")
 
     async def _get_connection(self) -> AsyncRealtimeConnection:
         await self.connected.wait()
@@ -312,10 +312,10 @@ class RealtimeApp:
         self.pending_tool_approval = (tool_name, args, future)
 
         # Display the tool request
-        print(f"\n🔧 Tool Call Request: {tool_name}")
+        print(f"\n🐜 tool call request: {tool_name}")
         if args:
-            print(f"Arguments: {json.dumps(args, indent=2)}")
-        print("Approve this tool call? Type 'y' for yes, 'n' for no:")
+            print(f"arguments: {json.dumps(args, indent=2)}")
+        print("approve this tool call? type 'y' for yes, 'n' for no:")
 
         # Wait for the main input loop to resolve this
         return await future
@@ -408,7 +408,7 @@ class RealtimeApp:
         except KeyboardInterrupt:
             pass
         except Exception as e:
-            print(f"Audio error: {e}")
+            print(f"❌ audio error: {e}")
         finally:
             stream.stop()
             stream.close()
@@ -436,26 +436,26 @@ class RealtimeApp:
                         tool_name, args, future = self.pending_tool_approval
                         if user_input.lower() in ['y', 'yes']:
                             future.set_result(True)
-                            print("✅ Tool call approved")
+                            print("🐜 tool call approved")
                         elif user_input.lower() in ['n', 'no']:
                             future.set_result(False)
-                            print("❌ Tool call denied")
+                            print("❌ tool call denied")
                         else:
-                            print("Please enter 'y' for yes or 'n' for no:")
+                            print("please enter 'y' for yes or 'n' for no:")
                             continue
 
                         self.pending_tool_approval = None
                         continue
 
                     if user_input == "q":
-                        print("Goodbye!")
+                        print("🐜 goodbye!")
                         return
 
                     if user_input == "k":
                         if self.is_recording:
                             self.should_send_audio.clear()
                             self.is_recording = False
-                            print("⏹ Recording stopped")
+                            print("🐜 recording stopped")
                             print(recording_prompt)
 
                             if self.session and self.session.turn_detection is None:
@@ -470,13 +470,13 @@ class RealtimeApp:
                         else:
                             self.should_send_audio.set()
                             self.is_recording = True
-                            print("▶️ Recording started... (Press 'k' + Enter to stop)")
+                            print("🐜 recording started... (press 'k' + enter to stop)")
 
                 except EOFError:
                     break
 
         except KeyboardInterrupt:
-            print("\nGoodbye!")
+            print("\n🐜 goodbye!")
 
 
 async def main():
@@ -484,7 +484,7 @@ async def main():
     try:
         await app.start()
     except KeyboardInterrupt:
-        print("\nGoodbye!")
+        print("\n🐜 goodbye!")
 
 if __name__ == "__main__":
     try:
