@@ -178,12 +178,12 @@ class RealtimeApp:
         self.mcp_client = MCPClient()
         self.is_recording = False
         self.response_started = False
+        self.pending_tool_approval = None  # (tool_name, args, future)
 
 
     async def start(self) -> None:
         """Start the application."""
         print("🔊 GPT Audio Control - Terminal Version")
-        print("Press 'k' + Enter to start/stop recording, 'q' + Enter to quit")
         print("" + "="*50)
 
         # Start background tasks and keep references
@@ -313,24 +313,20 @@ class RealtimeApp:
         return self.connection
 
 
-    def get_sync_user_approval(self, tool_name: str, args: dict) -> bool:
-        """Get user approval for tool execution (sync version)."""
+    async def get_user_approval(self, tool_name: str, args: dict) -> bool:
+        """Get user approval for tool execution via main input loop."""
+        # Set up pending approval and wait for result
+        future = asyncio.Future()
+        self.pending_tool_approval = (tool_name, args, future)
+
+        # Display the tool request
         print(f"\n🔧 Tool Call Request: {tool_name}")
         if args:
             print(f"Arguments: {json.dumps(args, indent=2)}")
+        print("Approve this tool call? Type 'y' for yes, 'n' for no:")
 
-        while True:
-            try:
-                response = input("Approve this tool call? [y/N]: ").strip().lower()
-                if response in ['y', 'yes']:
-                    return True
-                elif response in ['n', 'no', '']:
-                    return False
-                else:
-                    print("Please enter 'y' for yes or 'n' for no.")
-            except (EOFError, KeyboardInterrupt):
-                print("\nTool call denied.")
-                return False
+        # Wait for the main input loop to resolve this
+        return await future
 
     async def handle_function_call(self, function_call_item: Any) -> None:
         """Handle function calls from the model."""
@@ -343,10 +339,9 @@ class RealtimeApp:
             args = {}
 
         # Get user approval for tool execution
-        approved = await asyncio.get_event_loop().run_in_executor(None, lambda: self.get_sync_user_approval(tool_name, args))
+        approved = await self.get_user_approval(tool_name, args)
 
         if not approved:
-            print("❌ Tool call denied by user")
             # Send denial result back to the model
             connection = await self._get_connection()
             await connection.conversation.item.create(
@@ -435,13 +430,30 @@ class RealtimeApp:
         def get_input():
             return input()
 
+        # Show initial recording prompt
+        recording_prompt = "🔴 Press 'k' + Enter to start recording ('q' + Enter to quit)"
+        print(f"\n{recording_prompt}")
+
         try:
             while True:
-                status = "🔴 Recording... (Press 'k' + Enter to stop)" if self.is_recording else "⚪ Press 'k' + Enter to start recording ('q' + Enter to quit)"
-                print(f"\n{status}")
-
                 try:
                     user_input = await loop.run_in_executor(None, get_input)
+
+                    # Handle tool approval if pending
+                    if self.pending_tool_approval:
+                        tool_name, args, future = self.pending_tool_approval
+                        if user_input.lower() in ['y', 'yes']:
+                            future.set_result(True)
+                            print("✅ Tool call approved")
+                        elif user_input.lower() in ['n', 'no']:
+                            future.set_result(False)
+                            print("❌ Tool call denied")
+                        else:
+                            print("Please enter 'y' for yes or 'n' for no:")
+                            continue
+
+                        self.pending_tool_approval = None
+                        continue
 
                     if user_input == "q":
                         print("Goodbye!")
@@ -452,6 +464,7 @@ class RealtimeApp:
                             self.should_send_audio.clear()
                             self.is_recording = False
                             print("⏹ Recording stopped")
+                            print(recording_prompt)
 
                             if self.session and self.session.turn_detection is None:
                                 # The default in the API is that the model will automatically detect when the user has
@@ -465,7 +478,7 @@ class RealtimeApp:
                         else:
                             self.should_send_audio.set()
                             self.is_recording = True
-                            print("▶️ Recording started")
+                            print("▶️ Recording started... (Press 'k' + Enter to stop)")
 
                 except EOFError:
                     break
