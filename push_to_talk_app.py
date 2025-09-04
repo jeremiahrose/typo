@@ -1,10 +1,10 @@
 #!/usr/bin/env uv run
 ####################################################################
-# Sample TUI app with a push to talk interface to the Realtime API #
+# Push to talk terminal app interface to the Realtime API         #
 # If you have `uv` installed and the `OPENAI_API_KEY`              #
 # environment variable set, you can run this example with just     #
 #                                                                  #
-# `./examples/realtime/push_to_talk_app.py`                        #
+# `./push_to_talk_app.py`                                          #
 #                                                                  #
 # On Mac, you'll also need `brew install portaudio ffmpeg`           #
 ####################################################################
@@ -12,7 +12,6 @@
 # /// script
 # requires-python = ">=3.9"
 # dependencies = [
-#     "textual",
 #     "numpy",
 #     "pyaudio",
 #     "pydub",
@@ -27,107 +26,19 @@ import base64
 import asyncio
 import json
 import subprocess
+import sys
 from typing import Any, cast
-from typing_extensions import override
 
-from textual import events
 from audio_util import CHANNELS, SAMPLE_RATE, AudioPlayerAsync
-from textual.app import App, ComposeResult
-from textual.widgets import Button, Static, RichLog
-from textual.reactive import reactive
-from textual.containers import Container, Horizontal
 
 from openai import AsyncOpenAI
 from openai.types.beta.realtime.session import Session
 from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
 
 
-class AudioStatusIndicator(Static):
-    """A widget that shows the current audio recording status."""
-
-    is_recording = reactive(False)
-
-    @override
-    def render(self) -> str:
-        status = (
-            "🔴 Recording... (Press K to stop)" if self.is_recording else "⚪ Press K to start recording (Q to quit)"
-        )
-        return status
-
-
-class RealtimeApp(App[None]):
-    CSS = """
-        Screen {
-            background: #1a1b26;  /* Dark blue-grey background */
-        }
-
-        Container {
-            border: double rgb(91, 164, 91);
-        }
-
-        Horizontal {
-            width: 100%;
-        }
-
-        #input-container {
-            height: 5;  /* Explicit height for input container */
-            margin: 1 1;
-            padding: 1 2;
-        }
-
-        Input {
-            width: 80%;
-            height: 3;  /* Explicit height for input */
-        }
-
-        Button {
-            width: 20%;
-            height: 3;  /* Explicit height for button */
-        }
-
-        #content-container {
-            width: 100%;
-            height: 90%;  /* Increased height since no session display */
-        }
-        
-        #response-pane {
-            width: 50%;
-            height: 100%;
-            border: round rgb(205, 133, 63);
-            margin-right: 1;
-        }
-        
-        #command-pane {
-            width: 50%;
-            height: 100%;
-            border: round rgb(91, 164, 91);
-            margin-left: 1;
-        }
-
-        #status-indicator {
-            height: 3;
-            content-align: center middle;
-            background: #2a2b36;
-            border: solid rgb(91, 164, 91);
-            margin: 1 1;
-        }
-
-
-        Static {
-            color: white;
-        }
-    """
-
-    client: AsyncOpenAI
-    should_send_audio: asyncio.Event
-    audio_player: AudioPlayerAsync
-    last_audio_item_id: str | None
-    connection: AsyncRealtimeConnection | None
-    session: Session | None
-    connected: asyncio.Event
+class RealtimeApp:
 
     def __init__(self) -> None:
-        super().__init__()
         self.connection = None
         self.session = None
         self.client = AsyncOpenAI()
@@ -135,25 +46,22 @@ class RealtimeApp(App[None]):
         self.last_audio_item_id = None
         self.should_send_audio = asyncio.Event()
         self.connected = asyncio.Event()
+        self.is_recording = False
+        self.response_started = False
 
-    @override
-    def compose(self) -> ComposeResult:
-        """Create child widgets for the app."""
-        with Container():
-            yield AudioStatusIndicator(id="status-indicator")
-            with Horizontal(id="content-container"):
-                yield RichLog(id="response-pane", wrap=True, highlight=True, markup=True, min_width=30)
-                yield RichLog(id="command-pane", wrap=True, highlight=True, markup=True, min_width=30)
 
-    async def on_mount(self) -> None:
-        self.run_worker(self.handle_realtime_connection())
-        self.run_worker(self.send_mic_audio())
+    async def start(self) -> None:
+        """Start the application."""
+        print("🔊 GPT Audio Control - Terminal Version")
+        print("Press 'k' + Enter to start/stop recording, 'q' + Enter to quit")
+        print("" + "="*50)
         
-        # Add labels to the panes
-        response_pane = self.query_one("#response-pane", RichLog)
-        command_pane = self.query_one("#command-pane", RichLog)
-        response_pane.write("[bold blue]📝 AI Responses[/bold blue]")
-        command_pane.write("[bold green]💻 Commands[/bold green]")
+        # Start background tasks
+        asyncio.create_task(self.handle_realtime_connection())
+        asyncio.create_task(self.send_mic_audio())
+        
+        # Handle user input
+        await self.handle_input()
 
     async def handle_realtime_connection(self) -> None:
         async with self.client.beta.realtime.connect(model="gpt-4o-realtime-preview") as conn:
@@ -204,21 +112,21 @@ class RealtimeApp(App[None]):
                     continue
 
                 if event.type == "response.audio_transcript.delta":
-                    try:
-                        text = acc_items[event.item_id]
-                    except KeyError:
-                        acc_items[event.item_id] = event.delta
-                    else:
-                        acc_items[event.item_id] = text + event.delta
-
-                    # Clear and update the entire content because RichLog otherwise treats each delta as a new line
-                    response_pane = self.query_one("#response-pane", RichLog)
-                    response_pane.clear()
-                    response_pane.write("[bold blue]📝 AI Responses[/bold blue]")
-                    response_pane.write(acc_items[event.item_id])
+                    # Print the AI prefix only once when starting a new response
+                    if not self.response_started:
+                        print("🤖 AI: ", end="", flush=True)
+                        self.response_started = True
+                    
+                    # Simply print the delta text (new characters only)
+                    print(event.delta, end="", flush=True)
                     continue
 
                 if event.type == "response.done":
+                    # Print newline after response is complete
+                    if self.response_started:
+                        print()  # Move to new line after streaming is complete
+                        self.response_started = False
+                        
                     # Check if response contains function calls
                     if hasattr(event, 'response') and hasattr(event.response, 'output'):
                         for output_item in event.response.output:
@@ -238,9 +146,8 @@ class RealtimeApp(App[None]):
             args = json.loads(function_call_item.arguments)
             command = args.get("command", "")
             
-            # Display command in the command pane
-            command_pane = self.query_one("#command-pane", RichLog)
-            command_pane.write(f"💻 [bold cyan]Command:[/bold cyan] [yellow]{command}[/yellow]")
+            # Display command
+            print(f"\n💻 Command: {command}")
             
             # Execute the command
             try:
@@ -254,16 +161,16 @@ class RealtimeApp(App[None]):
                 
                 # Display the output
                 if result.stdout:
-                    command_pane.write(f"[green]✓ Output:[/green]")
-                    command_pane.write(f"[dim]{result.stdout.strip()}[/dim]")
+                    print("✓ Output:")
+                    print(f"  {result.stdout.strip()}")
                 
                 if result.stderr:
-                    command_pane.write(f"[red]⚠ Error:[/red]")
-                    command_pane.write(f"[dim red]{result.stderr.strip()}[/dim red]")
+                    print("⚠ Error:")
+                    print(f"  {result.stderr.strip()}")
                 
                 # Show return code if non-zero
                 if result.returncode != 0:
-                    command_pane.write(f"[red]Exit code: {result.returncode}[/red]")
+                    print(f"Exit code: {result.returncode}")
                 
                 command_result = {
                     "stdout": result.stdout,
@@ -272,14 +179,14 @@ class RealtimeApp(App[None]):
                 }
                 
             except subprocess.TimeoutExpired:
-                command_pane.write(f"[red]⚠ Command timed out (30s)[/red]")
+                print("⚠ Command timed out (30s)")
                 command_result = {"error": "Command timed out after 30 seconds"}
                 
             except Exception as e:
-                command_pane.write(f"[red]⚠ Error executing command: {str(e)}[/red]")
+                print(f"⚠ Error executing command: {str(e)}")
                 command_result = {"error": f"Failed to execute: {str(e)}"}
             
-            command_pane.write("")  # Add blank line for spacing
+            print()  # Add blank line for spacing
             
             # Send function call result back to the model
             connection = await self._get_connection()
@@ -311,8 +218,6 @@ class RealtimeApp(App[None]):
         )
         stream.start()
 
-        status_indicator = self.query_one(AudioStatusIndicator)
-
         try:
             while True:
                 if stream.read_available < read_size:
@@ -320,7 +225,7 @@ class RealtimeApp(App[None]):
                     continue
 
                 await self.should_send_audio.wait()
-                status_indicator.is_recording = True
+                self.is_recording = True
 
                 data, _ = stream.read(read_size)
 
@@ -338,36 +243,57 @@ class RealtimeApp(App[None]):
             stream.stop()
             stream.close()
 
-    async def on_key(self, event: events.Key) -> None:
-        """Handle key press events."""
-        if event.key == "enter":
-            self.query_one(Button).press()
-            return
+    async def handle_input(self) -> None:
+        """Handle user input from terminal."""
+        import asyncio
+        
+        loop = asyncio.get_event_loop()
+        
+        def get_input():
+            return input()
+        
+        try:
+            while True:
+                status = "🔴 Recording... (Press 'k' + Enter to stop)" if self.is_recording else "⚪ Press 'k' + Enter to start recording ('q' + Enter to quit)"
+                print(f"\n{status}")
+                
+                try:
+                    user_input = await loop.run_in_executor(None, get_input)
+                    
+                    if user_input == "q":
+                        print("Goodbye!")
+                        return
+                    
+                    if user_input == "k":
+                        if self.is_recording:
+                            self.should_send_audio.clear()
+                            self.is_recording = False
+                            print("⏹ Recording stopped")
+                            
+                            if self.session and self.session.turn_detection is None:
+                                # The default in the API is that the model will automatically detect when the user has
+                                # stopped talking and then start responding itself.
+                                #
+                                # However if we're in manual `turn_detection` mode then we need to
+                                # manually tell the model to commit the audio buffer and start responding.
+                                conn = await self._get_connection()
+                                await conn.input_audio_buffer.commit()
+                                await conn.response.create()
+                        else:
+                            self.should_send_audio.set()
+                            self.is_recording = True
+                            print("▶️ Recording started")
+                            
+                except EOFError:
+                    break
+                    
+        except KeyboardInterrupt:
+            print("\nGoodbye!")
 
-        if event.key == "q":
-            self.exit()
-            return
 
-        if event.key == "k":
-            status_indicator = self.query_one(AudioStatusIndicator)
-            if status_indicator.is_recording:
-                self.should_send_audio.clear()
-                status_indicator.is_recording = False
-
-                if self.session and self.session.turn_detection is None:
-                    # The default in the API is that the model will automatically detect when the user has
-                    # stopped talking and then start responding itself.
-                    #
-                    # However if we're in manual `turn_detection` mode then we need to
-                    # manually tell the model to commit the audio buffer and start responding.
-                    conn = await self._get_connection()
-                    await conn.input_audio_buffer.commit()
-                    await conn.response.create()
-            else:
-                self.should_send_audio.set()
-                status_indicator.is_recording = True
-
+async def main():
+    app = RealtimeApp()
+    await app.start()
 
 if __name__ == "__main__":
-    app = RealtimeApp()
-    app.run()
+    asyncio.run(main())
