@@ -183,10 +183,12 @@ class RealtimeApp:
         # Start background tasks and keep references
         self.realtime_task = asyncio.create_task(self.handle_realtime_connection())
         self.audio_task = asyncio.create_task(self.send_mic_audio())
-        self.mcp_task = asyncio.create_task(self.initialize_mcp())
+
+        # Initialize MCP first, then start input handling
+        await self.initialize_mcp()
 
         try:
-            # Handle user input
+            # Handle user input (after MCP is ready)
             await self.handle_input()
         except KeyboardInterrupt:
             print("\n🐜 shutting down...")
@@ -202,8 +204,6 @@ class RealtimeApp:
             self.realtime_task.cancel()
         if hasattr(self, 'audio_task'):
             self.audio_task.cancel()
-        if hasattr(self, 'mcp_task'):
-            self.mcp_task.cancel()
 
         # Close MCP client
         await self.mcp_client.close()
@@ -214,8 +214,6 @@ class RealtimeApp:
             tasks.append(self.realtime_task)
         if hasattr(self, 'audio_task'):
             tasks.append(self.audio_task)
-        if hasattr(self, 'mcp_task'):
-            tasks.append(self.mcp_task)
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
