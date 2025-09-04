@@ -22,18 +22,13 @@
 #
 # ///
 from __future__ import annotations
-
 import base64
 import asyncio
 import json
-import subprocess
 import sys
 from typing import Any, cast
-
 from fastmcp import Client
-
 from audio_util import CHANNELS, SAMPLE_RATE, AudioPlayerAsync
-
 from openai import AsyncOpenAI
 from openai.types.beta.realtime.session import Session
 from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
@@ -255,27 +250,8 @@ class RealtimeApp:
                     await asyncio.sleep(1)
                     wait_count += 1
 
-                # Configure session with MCP tools and built-in commands
-                tools = [
-                    {
-                        "type": "function",
-                        "name": "run_command",
-                        "description": "Execute a bash command on the user's system.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "command": {
-                                    "type": "string",
-                                    "description": "The bash command to execute"
-                                }
-                            },
-                            "required": ["command"]
-                        }
-                    }
-                ]
-
-                # Add MCP tools if available
-                tools.extend(self.mcp_client.available_tools)
+                # Configure session with MCP tools
+                tools = self.mcp_client.available_tools
 
                 await conn.session.update(session={
                     "turn_detection": {"type": "server_vad"},
@@ -342,7 +318,7 @@ class RealtimeApp:
         print(f"\n🔧 Tool Call Request: {tool_name}")
         if args:
             print(f"Arguments: {json.dumps(args, indent=2)}")
-        
+
         while True:
             try:
                 response = input("Approve this tool call? [y/N]: ").strip().lower()
@@ -368,7 +344,7 @@ class RealtimeApp:
 
         # Get user approval for tool execution
         approved = await asyncio.get_event_loop().run_in_executor(None, lambda: self.get_sync_user_approval(tool_name, args))
-        
+
         if not approved:
             print("❌ Tool call denied by user")
             # Send denial result back to the model
@@ -383,84 +359,25 @@ class RealtimeApp:
             await connection.response.create()
             return
 
-        if tool_name == "run_command":
-            command = args.get("command", "")
+        # Handle MCP tool calls
+        # Execute the MCP tool
+        result = await self.mcp_client.call_tool(tool_name, args)
 
-            # Display command
-            print(f"\n💻 Command: {command}")
+        # Display the result
+        self.mcp_client.print_result(tool_name, args, result)
 
-            # Execute the command
-            try:
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
+        # Send function call result back to the model
+        connection = await self._get_connection()
+        await connection.conversation.item.create(
+            item={
+                "type": "function_call_output",
+                "call_id": function_call_item.call_id,
+                "output": json.dumps(self.mcp_client.serialize_mcp_result(result))
+            }
+        )
 
-                # Display the output
-                if result.stdout:
-                    print("✓ Output:")
-                    print(f"  {result.stdout.strip()}")
-
-                if result.stderr:
-                    print("⚠ Error:")
-                    print(f"  {result.stderr.strip()}")
-
-                # Show return code if non-zero
-                if result.returncode != 0:
-                    print(f"Exit code: {result.returncode}")
-
-                command_result = {
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                    "returncode": result.returncode
-                }
-
-            except subprocess.TimeoutExpired:
-                print("⚠ Command timed out (30s)")
-                command_result = {"error": "Command timed out after 30 seconds"}
-
-            except Exception as e:
-                print(f"⚠ Error executing command: {str(e)}")
-                command_result = {"error": f"Failed to execute: {str(e)}"}
-
-            print()  # Add blank line for spacing
-
-            # Send function call result back to the model
-            connection = await self._get_connection()
-            await connection.conversation.item.create(
-                item={
-                    "type": "function_call_output",
-                    "call_id": function_call_item.call_id,
-                    "output": json.dumps(command_result)
-                }
-            )
-
-            # Generate a response from the model
-            await connection.response.create()
-
-        else:
-            # Handle MCP tool calls
-            # Execute the MCP tool
-            result = await self.mcp_client.call_tool(tool_name, args)
-
-            # Display the result
-            self.mcp_client.print_result(tool_name, args, result)
-
-            # Send function call result back to the model
-            connection = await self._get_connection()
-            await connection.conversation.item.create(
-                item={
-                    "type": "function_call_output",
-                    "call_id": function_call_item.call_id,
-                    "output": json.dumps(self.mcp_client.serialize_mcp_result(result))
-                }
-            )
-
-            # Generate a response from the model
-            await connection.response.create()
+        # Generate a response from the model
+        await connection.response.create()
 
     async def send_mic_audio(self) -> None:
         import sounddevice as sd  # type: ignore
