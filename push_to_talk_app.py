@@ -35,9 +35,13 @@ from openai.types.beta.realtime.session import Session
 from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
 
 
-def info(message: str) -> None:
+def info(message: str, **kwargs) -> None:
     """Print info message with mascot emoji."""
-    print(f"🐜 {message}")
+    print(f"🐛 {message}", **kwargs)
+
+def debug(message: str) -> None:
+    """Print debug message with gear emoji."""
+    print(f"⚙️ {message}")
 
 def error(message: str) -> None:
     """Print error message with red cross."""
@@ -73,7 +77,7 @@ class MCPClient:
                 config,
                 roots=[f"file://{current_dir}/"]
             )
-            info("loaded mcp.json")
+            debug("loaded mcp.json")
         except Exception as e:
             error(f"mcp.json validation failed: {e}")
             raise
@@ -141,29 +145,31 @@ class MCPClient:
 
     def print_result(self, tool_name: str, args: dict, result: dict) -> None:
         """Print MCP tool execution result to terminal."""
-        info(f"mcp tool: {tool_name}")
-        if args:
-            print(f"arguments: {args}")
 
         # Display the result
         if result.get("success"):
-            info("success")
             content = result.get("content", [])
+            content_strings = []
 
             for item in content:
                 if hasattr(item, 'type') and item.type == "text":
-                    print(f"  {item.text}")
+                    content_strings.append(f"  {item.text}")
                 elif isinstance(item, dict) and item.get("type") == "text":
-                    print(f"  {item.get('text', '')}")
+                    content_strings.append(f"  {item.get('text', '')}")
                 else:
-                    print(f"  {str(item)}")
+                    content_strings.append(f"  {str(item)}")
+
+            success_msg = "tool response:"
+            if content_strings:
+                success_msg += "\n" + "\n".join(content_strings)
+
+            debug(success_msg)
 
             if result.get("isError"):
                 error("tool reported an error")
         else:
-            error("failed")
             err_msg = result.get("error", "Unknown error")
-            print(f"  {err_msg}")
+            error(f"failed\n  {err_msg}")
 
         print()  # Add blank line for spacing
 
@@ -192,7 +198,7 @@ class RealtimeApp:
     async def start(self) -> None:
         """Start the application."""
         info("typo is here to do your bidding")
-        print("" + "="*50)
+        print("" + "="*34)
 
         # Start background tasks and keep references
         self.realtime_task = asyncio.create_task(self.handle_realtime_connection())
@@ -205,7 +211,7 @@ class RealtimeApp:
             # Handle user input (after MCP is ready)
             await self.handle_input()
         except KeyboardInterrupt:
-            print("\n"); info("shutting down...")
+            print("\n"); debug("shutting down...")
         finally:
             await self.cleanup()
 
@@ -236,7 +242,7 @@ class RealtimeApp:
         """Initialize MCP client connection."""
         try:
             await self.mcp_client.connect_to_mcp_servers()
-            info(f"mcp servers connected with {len(self.mcp_client.available_tools)} tools")
+            debug(f"mcp servers connected with {len(self.mcp_client.available_tools)} tools")
         except Exception as e:
             error(f"MCP connection failed: {e}")
             # Don't let MCP failure stop the app
@@ -286,7 +292,7 @@ class RealtimeApp:
                     if event.type == "response.audio_transcript.delta":
                         # Print the AI prefix only once when starting a new response
                         if not self.response_started:
-                            print("🐜 ai: ", end="", flush=True)
+                            print("🐛 ", end="", flush=True)
                             self.response_started = True
 
                         # Simply print the delta text (new characters only)
@@ -324,10 +330,12 @@ class RealtimeApp:
         self.pending_tool_approval = (tool_name, args, future)
 
         # Display the tool request
-        info(f"tool call request: {tool_name}")
+        tool_msg = f"tool call request: {tool_name}"
         if args:
-            print(f"arguments: {json.dumps(args, indent=2, ensure_ascii=False)}")
-        print("approve this tool call? type 'y' for yes, 'n' for no:")
+            for key, value in args.items():
+                tool_msg += f"\n   {key}: {value}"
+        info(tool_msg)
+        info("approve this tool call? type 'y' for yes, 'n' for no:")
 
         # Wait for the main input loop to resolve this
         return await future
@@ -435,8 +443,8 @@ class RealtimeApp:
             return input()
 
         # Show initial recording prompt
-        recording_prompt = "🔴 Press 'k' + Enter to start recording ('q' + Enter to quit)"
-        print(f"{recording_prompt}")
+        recording_prompt = "press 'k' + Enter to start recording ('q' + Enter to quit)"
+        info(f"{recording_prompt}")
 
         try:
             while True:
@@ -448,10 +456,10 @@ class RealtimeApp:
                         tool_name, args, future = self.pending_tool_approval
                         if user_input.lower() in ['y', 'yes']:
                             future.set_result(True)
-                            info("tool call approved")
+                            debug("tool call approved")
                         elif user_input.lower() in ['n', 'no']:
                             future.set_result(False)
-                            error("tool call denied")
+                            debug("tool call denied")
                         else:
                             print("please enter 'y' for yes or 'n' for no:")
                             continue
@@ -468,7 +476,7 @@ class RealtimeApp:
                             self.should_send_audio.clear()
                             self.is_recording = False
                             info("recording stopped")
-                            print(recording_prompt)
+                            info(recording_prompt)
 
                             if self.session and self.session.turn_detection is None:
                                 # The default in the API is that the model will automatically detect when the user has
