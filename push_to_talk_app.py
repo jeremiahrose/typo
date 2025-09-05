@@ -35,6 +35,15 @@ from openai.types.beta.realtime.session import Session
 from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
 
 
+def info(message: str) -> None:
+    """Print info message with mascot emoji."""
+    print(f"🐜 {message}")
+
+def error(message: str) -> None:
+    """Print error message with red cross."""
+    print(f"❌ {message}")
+
+
 class MCPClient:
     """MCP client for connecting to and managing MCP servers."""
 
@@ -49,12 +58,12 @@ class MCPClient:
             with open("mcp.json", "r") as f:
                 config = json.load(f)
         except FileNotFoundError:
-            print("❌ mcp.json not found, not using any MCP servers")
+            error("mcp.json not found, not using any MCP servers")
             config = {
                 "mcpServers": {}
             }
         except json.JSONDecodeError as e:
-            print(f"❌ mcp.json parsing error: {e}")
+            error(f"mcp.json parsing error: {e}")
             raise
 
         # Create and validate client with FastMCP
@@ -64,9 +73,9 @@ class MCPClient:
                 config,
                 roots=[f"file://{current_dir}/"]
             )
-            print("🐜 loaded mcp.json")
+            info("loaded mcp.json")
         except Exception as e:
-            print(f"❌ mcp.json validation failed: {e}")
+            error(f"mcp.json validation failed: {e}")
             raise
 
         # Connect and get available tools
@@ -132,13 +141,13 @@ class MCPClient:
 
     def print_result(self, tool_name: str, args: dict, result: dict) -> None:
         """Print MCP tool execution result to terminal."""
-        print(f"🐜 mcp tool: {tool_name}")
+        info(f"mcp tool: {tool_name}")
         if args:
             print(f"arguments: {args}")
 
         # Display the result
         if result.get("success"):
-            print("🐜 success")
+            info("success")
             content = result.get("content", [])
 
             for item in content:
@@ -150,11 +159,11 @@ class MCPClient:
                     print(f"  {str(item)}")
 
             if result.get("isError"):
-                print("🐜 tool reported an error")
+                error("tool reported an error")
         else:
-            print("❌ failed")
-            error = result.get("error", "Unknown error")
-            print(f"  {error}")
+            error("failed")
+            err_msg = result.get("error", "Unknown error")
+            print(f"  {err_msg}")
 
         print()  # Add blank line for spacing
 
@@ -182,7 +191,7 @@ class RealtimeApp:
 
     async def start(self) -> None:
         """Start the application."""
-        print("🐜 typo is here to do your bidding")
+        info("typo is here to do your bidding")
         print("" + "="*50)
 
         # Start background tasks and keep references
@@ -196,13 +205,13 @@ class RealtimeApp:
             # Handle user input (after MCP is ready)
             await self.handle_input()
         except KeyboardInterrupt:
-            print("\n🐜 shutting down...")
+            print("\n"); info("shutting down...")
         finally:
             await self.cleanup()
 
     async def cleanup(self) -> None:
         """Clean up background tasks and connections."""
-        print("\n🐜 cleaning up...")
+        print("\n"); info("cleaning up...")
 
         # Cancel background tasks
         if hasattr(self, 'realtime_task'):
@@ -227,9 +236,9 @@ class RealtimeApp:
         """Initialize MCP client connection."""
         try:
             await self.mcp_client.connect_to_mcp_servers()
-            print(f"🐜 MCP servers connected with {len(self.mcp_client.available_tools)} tools")
+            info(f"mcp servers connected with {len(self.mcp_client.available_tools)} tools")
         except Exception as e:
-            print(f"❌ MCP connection failed: {e}")
+            error(f"MCP connection failed: {e}")
             # Don't let MCP failure stop the app
 
     async def handle_realtime_connection(self) -> None:
@@ -300,7 +309,7 @@ class RealtimeApp:
             # Task was cancelled, exit gracefully
             pass
         except Exception as e:
-            print(f"❌ realtime connection error: {e}")
+            error(f"realtime connection error: {e}")
 
     async def _get_connection(self) -> AsyncRealtimeConnection:
         await self.connected.wait()
@@ -315,7 +324,7 @@ class RealtimeApp:
         self.pending_tool_approval = (tool_name, args, future)
 
         # Display the tool request
-        print(f"\n🐜 tool call request: {tool_name}")
+        info(f"tool call request: {tool_name}")
         if args:
             print(f"arguments: {json.dumps(args, indent=2, ensure_ascii=False)}")
         print("approve this tool call? type 'y' for yes, 'n' for no:")
@@ -411,7 +420,7 @@ class RealtimeApp:
         except KeyboardInterrupt:
             pass
         except Exception as e:
-            print(f"❌ audio error: {e}")
+            error(f"audio error: {e}")
         finally:
             stream.stop()
             stream.close()
@@ -439,10 +448,10 @@ class RealtimeApp:
                         tool_name, args, future = self.pending_tool_approval
                         if user_input.lower() in ['y', 'yes']:
                             future.set_result(True)
-                            print("🐜 tool call approved")
+                            info("tool call approved")
                         elif user_input.lower() in ['n', 'no']:
                             future.set_result(False)
-                            print("❌ tool call denied")
+                            error("tool call denied")
                         else:
                             print("please enter 'y' for yes or 'n' for no:")
                             continue
@@ -451,14 +460,14 @@ class RealtimeApp:
                         continue
 
                     if user_input == "q":
-                        print("🐜 goodbye!")
+                        info("goodbye!")
                         return
 
                     if user_input == "k":
                         if self.is_recording:
                             self.should_send_audio.clear()
                             self.is_recording = False
-                            print("🐜 recording stopped")
+                            info("recording stopped")
                             print(recording_prompt)
 
                             if self.session and self.session.turn_detection is None:
@@ -473,13 +482,13 @@ class RealtimeApp:
                         else:
                             self.should_send_audio.set()
                             self.is_recording = True
-                            print("🐜 recording started... (press 'k' + enter to stop)")
+                            info("recording started... (press 'k' + enter to stop)")
 
                 except EOFError:
                     break
 
         except KeyboardInterrupt:
-            print("\n🐜 goodbye!")
+            print("\n"); info("goodbye!")
 
 
 async def main():
@@ -487,7 +496,7 @@ async def main():
     try:
         await app.start()
     except KeyboardInterrupt:
-        print("\n🐜 goodbye!")
+        print("\n"); info("goodbye!")
 
 if __name__ == "__main__":
     try:
