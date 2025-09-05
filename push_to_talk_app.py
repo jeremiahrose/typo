@@ -28,6 +28,7 @@ import json
 import sys
 from typing import Any, cast
 from fastmcp import Client
+import os
 from audio_util import CHANNELS, SAMPLE_RATE, AudioPlayerAsync
 from openai import AsyncOpenAI
 from openai.types.beta.realtime.session import Session
@@ -58,7 +59,11 @@ class MCPClient:
 
         # Create and validate client with FastMCP
         try:
-            self.client = Client(config)
+            current_dir = os.getcwd()
+            self.client = Client(
+                config,
+                roots=[f"file://{current_dir}/"]
+            )
             print("🐜 loaded mcp.json")
         except Exception as e:
             print(f"❌ mcp.json validation failed: {e}")
