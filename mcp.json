@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "filesystem": {
+    "iterm-mcp": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/jez/Personal Code/gpt-audio-control"]
+      "args": ["-y", "iterm-mcp"]
     }
   }
 }

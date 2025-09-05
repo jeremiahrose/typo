@@ -317,7 +317,7 @@ class RealtimeApp:
         # Display the tool request
         print(f"\n🐜 tool call request: {tool_name}")
         if args:
-            print(f"arguments: {json.dumps(args, indent=2)}")
+            print(f"arguments: {json.dumps(args, indent=2, ensure_ascii=False)}")
         print("approve this tool call? type 'y' for yes, 'n' for no:")
 
         # Wait for the main input loop to resolve this
