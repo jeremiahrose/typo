@@ -1,8 +1,10 @@
 {
   "mcpServers": {
-    "iterm-mcp": {
+    "applescript_execute": {
       "command": "npx",
-      "args": ["-y", "iterm-mcp"]
+      "args": [
+        "@peakmojo/applescript-mcp"
+      ]
     }
   }
 }
