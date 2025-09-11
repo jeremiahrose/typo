@@ -34,18 +34,30 @@ from openai import AsyncOpenAI
 from openai.types.beta.realtime.session import Session
 from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
 
+# Global log level setting
+LOG_LEVEL = "info"  # Options: "debug", "info", "error"
+
+def should_log(level: str) -> bool:
+    """Check if we should log at the given level based on current LOG_LEVEL."""
+    levels = {"debug": 0, "info": 1, "error": 2}
+    current_level_num = levels.get(LOG_LEVEL, 1)
+    message_level_num = levels.get(level, 1)
+    return message_level_num >= current_level_num
 
 def info(message: str, **kwargs) -> None:
     """Print info message with mascot emoji."""
-    print(f"🐛 {message}", **kwargs)
+    if should_log("info"):
+        print(f"🐛 {message}", **kwargs)
 
 def debug(message: str) -> None:
     """Print debug message with gear emoji."""
-    print(f"⚙️ {message}")
+    if should_log("debug"):
+        print(f"⚙️ {message}")
 
 def error(message: str) -> None:
     """Print error message with red cross."""
-    print(f"❌ {message}")
+    if should_log("error"):
+        print(f"❌ {message}")
 
 
 class MCPClient:
@@ -184,7 +196,15 @@ class RealtimeApp:
     def __init__(self) -> None:
         self.connection = None
         self.session = None
-        self.client = AsyncOpenAI()
+        
+        # Initialize OpenAI client with debugging
+        try:
+            self.client = AsyncOpenAI()
+            debug("OpenAI client initialized successfully")
+        except Exception as e:
+            error(f"failed to initialize OpenAI client: {e}")
+            raise
+            
         self.audio_player = AudioPlayerAsync()
         self.last_audio_item_id = None
         self.should_send_audio = asyncio.Event()
@@ -197,6 +217,13 @@ class RealtimeApp:
 
     async def start(self) -> None:
         """Start the application."""
+        # Check for OpenAI API key
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            error("OPENAI_API_KEY environment variable not set")
+            return
+        debug(f"OpenAI API key found (length: {len(api_key)})")
+        
         info("typo is here to do your bidding")
         print("" + "="*34)
 
@@ -249,7 +276,9 @@ class RealtimeApp:
 
     async def handle_realtime_connection(self) -> None:
         try:
+            debug("attempting to connect to OpenAI Realtime API...")
             async with self.client.beta.realtime.connect(model="gpt-4o-realtime-preview") as conn:
+                debug("successfully connected to OpenAI Realtime API")
                 self.connection = conn
                 self.connected.set()
 
@@ -262,26 +291,49 @@ class RealtimeApp:
 
                 # Configure session with MCP tools
                 tools = self.mcp_client.available_tools
+                debug(f"configuring session with {len(tools)} tools")
 
-                await conn.session.update(session={
-                    "turn_detection": {"type": "server_vad"},
-                    "tools": tools,
-                    "tool_choice": "auto"
-                })
+                try:
+                    await conn.session.update(session={
+                        "turn_detection": {"type": "server_vad"},
+                        "tools": tools,
+                        "tool_choice": "auto"
+                    })
+                    debug("session configuration successful")
+                except Exception as e:
+                    error(f"session configuration failed: {e}")
+                    raise
 
                 acc_items: dict[str, Any] = {}
+                debug("starting event loop...")
 
                 async for event in conn:
+                    debug(f"received event: {event.type}")
+                    
                     if event.type == "session.created":
+                        debug(f"session created: {event.session.id}")
                         self.session = event.session
                         continue
 
                     if event.type == "session.updated":
+                        debug("session updated successfully")
                         self.session = event.session
+                        continue
+
+                    if event.type == "error":
+                        error(f"OpenAI API error: {getattr(event, 'error', 'unknown error')}")
+                        if hasattr(event, 'error') and hasattr(event.error, 'message'):
+                            error(f"error details: {event.error.message}")
+                        continue
+
+                    if event.type == "response.created":
+                        response_id = getattr(event.response, 'id', 'unknown') if hasattr(event, 'response') else 'unknown'
+                        debug(f"response created: {response_id}")
                         continue
 
                     if event.type == "response.audio.delta":
                         if event.item_id != self.last_audio_item_id:
+                            debug(f"new audio item: {event.item_id}")
                             self.audio_player.reset_frame_count()
                             self.last_audio_item_id = event.item_id
 
@@ -300,6 +352,34 @@ class RealtimeApp:
                         continue
 
                     if event.type == "response.done":
+                        debug("response completed")
+                        
+                        # Debug the response contents
+                        if hasattr(event, 'response'):
+                            response = event.response
+                            status = getattr(response, 'status', 'unknown')
+                            debug(f"response status: {status}")
+                            
+                            # If response failed, look for error details
+                            if status == 'failed':
+                                error("Response failed!")
+                                if hasattr(response, 'status_details'):
+                                    error(f"failure reason: {response.status_details}")
+                                if hasattr(response, 'error'):
+                                    error(f"response error: {response.error}")
+                            
+                            if hasattr(response, 'output'):
+                                debug(f"response has {len(response.output)} output items")
+                                for i, item in enumerate(response.output):
+                                    item_type = getattr(item, 'type', 'unknown')
+                                    debug(f"output item {i}: type={item_type}")
+                                    if hasattr(item, 'content'):
+                                        debug(f"  content: {getattr(item.content, 'text', 'no text') if hasattr(item, 'content') else 'no content'}")
+                            else:
+                                debug("response has no output")
+                        else:
+                            debug("event has no response object")
+                        
                         # Print newline after response is complete
                         if self.response_started:
                             print()  # Move to new line after streaming is complete
@@ -309,8 +389,55 @@ class RealtimeApp:
                         if hasattr(event, 'response') and hasattr(event.response, 'output'):
                             for output_item in event.response.output:
                                 if hasattr(output_item, 'type') and output_item.type == "function_call":
+                                    debug(f"function call detected: {output_item.name}")
                                     await self.handle_function_call(output_item)
                         continue
+
+                    if event.type == "input_audio_buffer.committed":
+                        debug("audio buffer committed")
+                        continue
+
+                    if event.type == "input_audio_buffer.speech_started":
+                        debug("speech started detected")
+                        continue
+
+                    if event.type == "input_audio_buffer.speech_stopped":
+                        debug("speech stopped detected")
+                        continue
+
+                    if event.type == "conversation.item.created":
+                        if hasattr(event, 'item'):
+                            item = event.item
+                            item_type = getattr(item, 'type', 'unknown')
+                            item_id = getattr(item, 'id', 'unknown')
+                            debug(f"conversation item created: type={item_type}, id={item_id}")
+                            
+                            # Check if it's a message with content
+                            if item_type == 'message' and hasattr(item, 'content'):
+                                debug(f"message content length: {len(item.content)} items")
+                                for i, content in enumerate(item.content):
+                                    content_type = getattr(content, 'type', 'unknown')
+                                    debug(f"  content {i}: type={content_type}")
+                                    if content_type == 'input_audio' and hasattr(content, 'audio'):
+                                        audio_len = len(content.audio) if content.audio else 0
+                                        debug(f"    audio data length: {audio_len}")
+                        else:
+                            debug("conversation item created: no item details")
+                        continue
+
+                    # Check for any response-related events we might be missing
+                    if "response" in event.type:
+                        debug(f"unhandled response event: {event.type}")
+                        if hasattr(event, 'item_id'):
+                            debug(f"  item_id: {event.item_id}")
+                        if hasattr(event, 'content_index'):
+                            debug(f"  content_index: {event.content_index}")
+                        # Look for any error information in response events
+                        if hasattr(event, 'error'):
+                            error(f"error in {event.type}: {event.error}")
+                    
+                    # Log any unhandled event types
+                    debug(f"unhandled event type: {event.type}")
         except asyncio.CancelledError:
             # Task was cancelled, exit gracefully
             pass
@@ -416,10 +543,20 @@ class RealtimeApp:
 
                 connection = await self._get_connection()
                 if not sent_audio:
-                    asyncio.create_task(connection.send({"type": "response.cancel"}))
+                    # Only try to cancel if there might be an active response
+                    # Skip the cancel on first audio to avoid the error
+                    debug("starting to send audio (skipping response.cancel on first audio)")
                     sent_audio = True
 
-                await connection.input_audio_buffer.append(audio=base64.b64encode(cast(Any, data)).decode("utf-8"))
+                try:
+                    await connection.input_audio_buffer.append(audio=base64.b64encode(cast(Any, data)).decode("utf-8"))
+                except Exception as e:
+                    error(f"failed to append audio data: {e}")
+                    if "1000" in str(e):
+                        error("connection closed normally - likely due to end of conversation")
+                    else:
+                        error("unexpected audio connection error")
+                    break
 
                 await asyncio.sleep(0)
         except asyncio.CancelledError:
@@ -484,9 +621,13 @@ class RealtimeApp:
                                 #
                                 # However if we're in manual `turn_detection` mode then we need to
                                 # manually tell the model to commit the audio buffer and start responding.
-                                conn = await self._get_connection()
-                                await conn.input_audio_buffer.commit()
-                                await conn.response.create()
+                                try:
+                                    conn = await self._get_connection()
+                                    await conn.input_audio_buffer.commit()
+                                    await conn.response.create()
+                                    debug("manually triggered response in manual turn detection mode")
+                                except Exception as e:
+                                    error(f"failed to trigger manual response: {e}")
                         else:
                             self.should_send_audio.set()
                             self.is_recording = True
