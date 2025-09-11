@@ -18,6 +18,7 @@
 #     "sounddevice",
 #     "openai[realtime]",
 #     "fastmcp",
+#     "pynput",
 # ]
 #
 # ///
@@ -33,6 +34,8 @@ from audio_util import CHANNELS, SAMPLE_RATE, AudioPlayerAsync
 from openai import AsyncOpenAI
 from openai.types.beta.realtime.session import Session
 from openai.resources.beta.realtime.realtime import AsyncRealtimeConnection
+from pynput import keyboard
+import threading
 
 # Global log level setting
 LOG_LEVEL = "info"  # Options: "debug", "info", "error"
@@ -191,6 +194,48 @@ class MCPClient:
         pass
 
 
+class GlobalKeyboardListener:
+    """Global keyboard listener for tool approval using function keys."""
+    
+    def __init__(self, app):
+        self.app = app
+        self.listener = None
+        self.running = False
+        
+    def start(self):
+        """Start the global keyboard listener in a separate thread."""
+        if self.running:
+            return
+            
+        self.running = True
+        self.listener = keyboard.Listener(on_press=self.on_key_press)
+        self.listener.start()
+        debug("global keyboard listener started (Right Cmd=approve, Right Option=reject)")
+        
+    def stop(self):
+        """Stop the global keyboard listener."""
+        if self.listener:
+            self.listener.stop()
+            self.running = False
+            debug("global keyboard listener stopped")
+            
+    def on_key_press(self, key):
+        """Handle key press events."""
+        try:
+            if not self.app.pending_tool_approval:
+                return
+                
+            if key == keyboard.Key.cmd_r:
+                # Right Command = Approve
+                self.app.approve_pending_tool()
+            elif key == keyboard.Key.alt_r:
+                # Right Option/Alt = Reject
+                self.app.reject_pending_tool()
+                
+        except Exception as e:
+            debug(f"keyboard listener error: {e}")
+
+
 class RealtimeApp:
 
     def __init__(self) -> None:
@@ -213,6 +258,7 @@ class RealtimeApp:
         self.is_recording = False
         self.response_started = False
         self.pending_tool_approval = None  # (tool_name, args, future)
+        self.keyboard_listener = GlobalKeyboardListener(self)
 
 
     async def start(self) -> None:
@@ -227,6 +273,9 @@ class RealtimeApp:
         info("typo is here to do your bidding")
         print("" + "="*34)
 
+        # Start keyboard listener for tool approvals
+        self.keyboard_listener.start()
+        
         # Start background tasks and keep references
         self.realtime_task = asyncio.create_task(self.handle_realtime_connection())
         self.audio_task = asyncio.create_task(self.send_mic_audio())
@@ -252,6 +301,9 @@ class RealtimeApp:
         if hasattr(self, 'audio_task'):
             self.audio_task.cancel()
 
+        # Stop keyboard listener
+        self.keyboard_listener.stop()
+        
         # Close MCP client
         await self.mcp_client.close()
 
@@ -449,6 +501,21 @@ class RealtimeApp:
         assert self.connection is not None
         return self.connection
 
+    def approve_pending_tool(self):
+        """Approve the pending tool call (called by keyboard listener)."""
+        if self.pending_tool_approval:
+            tool_name, args, future = self.pending_tool_approval
+            if not future.done():
+                future.set_result(True)
+                info("tool call approved (Right Cmd)")
+                
+    def reject_pending_tool(self):
+        """Reject the pending tool call (called by keyboard listener)."""
+        if self.pending_tool_approval:
+            tool_name, args, future = self.pending_tool_approval
+            if not future.done():
+                future.set_result(False)
+                info("tool call rejected (Right Option)")
 
     async def get_user_approval(self, tool_name: str, args: dict) -> bool:
         """Get user approval for tool execution via main input loop."""
@@ -462,9 +529,9 @@ class RealtimeApp:
             for key, value in args.items():
                 tool_msg += f"\n   {key}: {value}"
         info(tool_msg)
-        info("approve this tool call? type 'y' for yes, 'n' for no:")
+        info("approve this tool call? Press Right Cmd to approve, Right Option to reject (or 'y'/'n' + Enter)")
 
-        # Wait for the main input loop to resolve this
+        # Wait for keyboard listener or CLI input to resolve this
         return await future
 
     async def handle_function_call(self, function_call_item: Any) -> None:
