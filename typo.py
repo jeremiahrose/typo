@@ -1,13 +1,4 @@
 #!/usr/bin/env uv run
-####################################################################
-# Push to talk terminal app interface to the Realtime API         #
-# If you have `uv` installed and the `OPENAI_API_KEY`              #
-# environment variable set, you can run this example with just     #
-#                                                                  #
-# `./push_to_talk_app.py`                                          #
-#                                                                  #
-# On Mac, you'll also need `brew install portaudio ffmpeg`           #
-####################################################################
 #
 # /// script
 # requires-python = ">=3.9"
@@ -38,7 +29,7 @@ from pynput import keyboard
 import threading
 
 # Global log level setting
-LOG_LEVEL = "debug"  # Options: "debug", "info", "error"
+LOG_LEVEL = "info"  # Options: "debug", "info", "error"
 
 def should_log(level: str) -> bool:
     """Check if we should log at the given level based on current LOG_LEVEL."""
