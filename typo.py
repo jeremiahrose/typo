@@ -38,7 +38,7 @@ from pynput import keyboard
 import threading
 
 # Global log level setting
-LOG_LEVEL = "info"  # Options: "debug", "info", "error"
+LOG_LEVEL = "debug"  # Options: "debug", "info", "error"
 
 def should_log(level: str) -> bool:
     """Check if we should log at the given level based on current LOG_LEVEL."""
@@ -61,6 +61,21 @@ def error(message: str) -> None:
     """Print error message with red cross."""
     if should_log("error"):
         print(f"❌ {message}")
+
+
+def load_system_prompt() -> str:
+    """Load system prompt from system_prompt.md file."""
+    try:
+        with open("system_prompt.md", "r") as f:
+            instructions = f.read().strip()
+        debug("loaded system prompt from system_prompt.md: " + instructions)
+        return instructions
+    except FileNotFoundError:
+        error("system_prompt.md not found - this file is required")
+        raise
+    except Exception as e:
+        error(f"failed to load system_prompt.md: {e}")
+        raise
 
 
 class MCPClient:
@@ -196,42 +211,42 @@ class MCPClient:
 
 class GlobalKeyboardListener:
     """Global keyboard listener for tool approval using function keys."""
-    
+
     def __init__(self, app):
         self.app = app
         self.listener = None
         self.running = False
-        
+
     def start(self):
         """Start the global keyboard listener in a separate thread."""
         if self.running:
             return
-            
+
         self.running = True
         self.listener = keyboard.Listener(on_press=self.on_key_press)
         self.listener.start()
         debug("global keyboard listener started (Right Cmd=approve, Right Option=reject)")
-        
+
     def stop(self):
         """Stop the global keyboard listener."""
         if self.listener:
             self.listener.stop()
             self.running = False
             debug("global keyboard listener stopped")
-            
+
     def on_key_press(self, key):
         """Handle key press events."""
         try:
             if not self.app.pending_tool_approval:
                 return
-                
+
             if key == keyboard.Key.cmd_r:
                 # Right Command = Approve
                 self.app.approve_pending_tool()
             elif key == keyboard.Key.alt_r:
                 # Right Option/Alt = Reject
                 self.app.reject_pending_tool()
-                
+
         except Exception as e:
             debug(f"keyboard listener error: {e}")
 
@@ -241,7 +256,7 @@ class RealtimeApp:
     def __init__(self) -> None:
         self.connection = None
         self.session = None
-        
+
         # Initialize OpenAI client with debugging
         try:
             self.client = AsyncOpenAI()
@@ -249,7 +264,7 @@ class RealtimeApp:
         except Exception as e:
             error(f"failed to initialize OpenAI client: {e}")
             raise
-            
+
         self.audio_player = AudioPlayerAsync()
         self.last_audio_item_id = None
         self.should_send_audio = asyncio.Event()
@@ -269,13 +284,13 @@ class RealtimeApp:
             error("OPENAI_API_KEY environment variable not set")
             return
         debug(f"OpenAI API key found (length: {len(api_key)})")
-        
+
         info("typo is here to do your bidding")
         print("" + "="*34)
 
         # Start keyboard listener for tool approvals
         self.keyboard_listener.start()
-        
+
         # Start background tasks and keep references
         self.realtime_task = asyncio.create_task(self.handle_realtime_connection())
         self.audio_task = asyncio.create_task(self.send_mic_audio())
@@ -303,7 +318,7 @@ class RealtimeApp:
 
         # Stop keyboard listener
         self.keyboard_listener.stop()
-        
+
         # Close MCP client
         await self.mcp_client.close()
 
@@ -349,7 +364,8 @@ class RealtimeApp:
                     await conn.session.update(session={
                         "turn_detection": {"type": "server_vad"},
                         "tools": tools,
-                        "tool_choice": "auto"
+                        "tool_choice": "auto",
+                        "instructions": load_system_prompt()
                     })
                     debug("session configuration successful")
                 except Exception as e:
@@ -360,8 +376,8 @@ class RealtimeApp:
                 debug("starting event loop...")
 
                 async for event in conn:
-                    debug(f"received event: {event.type}")
-                    
+                    # debug(f"received event: {event.type}")
+
                     if event.type == "session.created":
                         debug(f"session created: {event.session.id}")
                         self.session = event.session
@@ -385,7 +401,7 @@ class RealtimeApp:
 
                     if event.type == "response.audio.delta":
                         if event.item_id != self.last_audio_item_id:
-                            debug(f"new audio item: {event.item_id}")
+                            # debug(f"new audio item: {event.item_id}")
                             self.audio_player.reset_frame_count()
                             self.last_audio_item_id = event.item_id
 
@@ -405,13 +421,13 @@ class RealtimeApp:
 
                     if event.type == "response.done":
                         debug("response completed")
-                        
+
                         # Debug the response contents
                         if hasattr(event, 'response'):
                             response = event.response
                             status = getattr(response, 'status', 'unknown')
                             debug(f"response status: {status}")
-                            
+
                             # If response failed, look for error details
                             if status == 'failed':
                                 error("Response failed!")
@@ -419,7 +435,7 @@ class RealtimeApp:
                                     error(f"failure reason: {response.status_details}")
                                 if hasattr(response, 'error'):
                                     error(f"response error: {response.error}")
-                            
+
                             if hasattr(response, 'output'):
                                 debug(f"response has {len(response.output)} output items")
                                 for i, item in enumerate(response.output):
@@ -431,7 +447,7 @@ class RealtimeApp:
                                 debug("response has no output")
                         else:
                             debug("event has no response object")
-                        
+
                         # Print newline after response is complete
                         if self.response_started:
                             print()  # Move to new line after streaming is complete
@@ -463,7 +479,7 @@ class RealtimeApp:
                             item_type = getattr(item, 'type', 'unknown')
                             item_id = getattr(item, 'id', 'unknown')
                             debug(f"conversation item created: type={item_type}, id={item_id}")
-                            
+
                             # Check if it's a message with content
                             if item_type == 'message' and hasattr(item, 'content'):
                                 debug(f"message content length: {len(item.content)} items")
@@ -487,7 +503,7 @@ class RealtimeApp:
                         # Look for any error information in response events
                         if hasattr(event, 'error'):
                             error(f"error in {event.type}: {event.error}")
-                    
+
                     # Log any unhandled event types
                     debug(f"unhandled event type: {event.type}")
         except asyncio.CancelledError:
@@ -508,7 +524,7 @@ class RealtimeApp:
             if not future.done():
                 future.set_result(True)
                 info("tool call approved (Right Cmd)")
-                
+
     def reject_pending_tool(self):
         """Reject the pending tool call (called by keyboard listener)."""
         if self.pending_tool_approval:
