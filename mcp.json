@@ -1,10 +1,16 @@
 {
   "mcpServers": {
-    "applescript_execute": {
-      "command": "npx",
+    "macos-control": {
+      "command": "uv",
       "args": [
-        "@peakmojo/applescript-mcp"
-      ]
+        "run",
+        "--with",
+        "git+https://github.com/jeremiahrose/applescript-mcp.git",
+        "applescript-mcp"
+      ],
+      "env": {
+        "LOG_LEVEL": "INFO"
+      }
     }
   }
 }
